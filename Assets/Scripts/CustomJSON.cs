@@ -7,6 +7,9 @@ using System.Reflection;
 using System.Runtime.Serialization.Formatters;
 using Unity.VisualScripting;
 using UnityEngine;
+using System.ComponentModel;
+using static UnityEditor.MaterialProperty;
+using System.Globalization;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute
@@ -129,13 +132,18 @@ public static class CustomJSON
                             }
 
                             FieldInfo field = scriptType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            object value = parts[1];                           
-                            if (parts[1].IsConvertibleTo(field.FieldType, true))
+
+                            object value = null;
+                            if (field.FieldType.Name.Contains("Vector"))
                             {
-                                value = Convert.ChangeType(value, field.FieldType);
+                                value = VectorFromString(parts[1], field.FieldType);
+                            }
+                            else
+                            {
+                                value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
                             }
 
-                            field.SetValue(script, ?value);
+                            field.SetValue(script, value);
                         }
 
                     } while (!currLine.Contains("}"));
@@ -145,24 +153,62 @@ public static class CustomJSON
 
         }
     }
-    
+
     static void Filter(ref string _string)
     {
-        char[] filters = new char[] { '\n', '\"', ' ', ',', ':' };
+        char[] filters = new char[] { '\n', '\"', ' ', ',', ':', '(', ')' };
 
-        foreach (char c in filters)
+        if (_string.Contains("(") && !_string.Contains(":"))
         {
-            _string = _string.Replace(c.ToString(), string.Empty);
+            RemoveLast(",", ref _string);
+            _string = _string.Replace("\"", string.Empty);
+            _string = _string.Replace("(", string.Empty);
+            _string = _string.Replace(")", string.Empty);
+            _string = _string.Replace(" ", string.Empty);
+        }
+        else
+        {
+            foreach (char c in filters)
+            {
+                _string = _string.Replace(c.ToString(), string.Empty);
+            }
         }
     }
 
-    //“key”:“value”,“key”:“value”
-    // Array :
-    // "students":[
-    //{"firstName":"Tom", "lastName":"Jackson"},
-    //{ "firstName":"Linda", "lastName":"Garner"},
-    //{ "firstName":"Adam", "lastName":"Cooper"}
-    //]
+    static object VectorFromString(string _stringValue, Type _vectorType)
+    {
+        string[] parts = _stringValue.Split(',');
+
+        bool hasFloat = _vectorType == typeof(Vector2) || _vectorType == typeof(Vector3) || _vectorType == typeof(Vector4);
+
+        float[] values = new float[parts.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            float.TryParse(parts[i], hasFloat ? NumberStyles.Float : NumberStyles.Integer, CultureInfo.InvariantCulture, out values[i]);
+        }
+
+        object vector = Activator.CreateInstance(_vectorType);
+
+        switch(parts.Length)
+        {
+            case 2:
+                if (hasFloat)
+                    vector = new Vector2(values[0], values[1]);
+                else
+                    vector = new Vector2Int((int)values[0], (int)values[1]);
+                break;
+            case 3:
+                if (hasFloat)
+                    vector = new Vector3(values[0], values[1], values[2]);
+                else
+                    vector = new Vector3Int((int)values[0], (int)values[1], (int)values[2]);
+                break;
+            case 4: vector = new Vector4(values[0], values[1], values[2], values[3]); break;
+        }
+        
+        Type type = vector.GetType();
+        return vector;
+    }
 
     static string ParsePrimitive(JSONObject _jsonObject)
     {
