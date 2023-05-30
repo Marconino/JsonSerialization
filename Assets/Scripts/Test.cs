@@ -13,6 +13,7 @@ enum TestSave
 
 public class Test : MonoBehaviour
 {
+    [JSONRead] string testString = "salutlespotes";
     [JSONRead] float floatTest = 50.4f;
     [JSONRead] int intTest2 = 4;
     [JSONRead] double doubleTest3 = 47.874847980;
@@ -33,8 +34,8 @@ public class Test : MonoBehaviour
     [JSONRead] List<Vector3Int> test18 = new List<Vector3Int>();
     [JSONRead] List<Vector3> test19 = new List<Vector3>();
     [JSONRead] List<Vector4> test20 = new List<Vector4>();
-    [JSONRead] GameObject test21;
-    [JSONRead] List<GameObject> test22;
+    [SerializeField]  GameObject test21;
+     List<GameObject> test22;
     [JSONRead] TestSave test23 = TestSave.NON;
     [JSONRead] TestSave[] test24;
 
@@ -64,10 +65,18 @@ public class Test : MonoBehaviour
         test15.Add(false);
         test15.Add(true);
 
+        test16.Add(new Vector2(14.7f, 978.5f));
+        test16.Add(new Vector2(4.1f, 98.147f));
 
-        CustomJSON.GetJSONObjects(this);
+        test24 = new TestSave[3];
+        test24[0] = TestSave.OUI;
+        test24[1] = TestSave.NON;
+        test24[2] = TestSave.OUI;
+        
+        //CustomJSON.GetJSONObjects(this);
 
-        CustomJSON.Save("TestSave");
+        //CustomJSON.Save("TestSave");
+        //CustomJSON.Load("TestSave");
     }
 
     // Update is called once per frame
