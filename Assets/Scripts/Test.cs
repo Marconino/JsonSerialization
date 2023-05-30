@@ -13,17 +13,18 @@ enum TestSave
 
 public class Test : MonoBehaviour
 {
-    [JSONRead] string testString = "salutlespotes";
-    [JSONRead] float floatTest = 50.4f;
-    [JSONRead] int intTest2 = 4;
-    [JSONRead] double doubleTest3 = 47.874847980;
-    [JSONRead] long longTest4 = 44524246346332163;
-    [JSONRead] bool boolTest5 = true;
-    [JSONRead] Vector2 Vector2Test6 = new Vector2(14.6f,98.4f);
-    [JSONRead] Vector2Int test7 = new Vector2Int(90,100);
-    [JSONRead] Vector3Int test8 = new Vector3Int(40,96,78);
-    [JSONRead] Vector3 test9 = new Vector3(14589.4f, 12.0f, 79.7f);
-    [JSONRead] Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
+    string testString = "salutlespotes";
+    float floatTest = 50.4f;
+    int intTest2 = 4;
+    double doubleTest3 = 47.874847980;
+    long longTest4 = 44524246346332163;
+    bool boolTest5 = true;
+    Vector2 Vector2Test6 = new Vector2(14.6f, 98.4f);
+    Vector2Int test7 = new Vector2Int(90, 100);
+    Vector3Int test8 = new Vector3Int(40, 96, 78);
+    Vector3 test9 = new Vector3(14589.4f, 12.0f, 79.7f);
+    Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
+    [JSONRead] int[] testArrayInt = new int[] { 5, 10, 20 };
     [JSONRead] List<float> test11 = new List<float>();
     [JSONRead] List<int> test12 = new List<int>();
     [JSONRead] List<double> test13 = new List<double>();

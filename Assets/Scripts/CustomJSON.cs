@@ -138,6 +138,10 @@ public static class CustomJSON
                             {
                                 value = VectorFromString(parts[1], field.FieldType);
                             }
+                            else if(field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
+                            {
+                                value = ArrayFromString(parts[1], field.FieldType);
+                            }
                             else
                             {
                                 value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
@@ -156,23 +160,34 @@ public static class CustomJSON
 
     static void Filter(ref string _string)
     {
-        char[] filters = new char[] { '\n', '\"', ' ', ',', ':', '(', ')' };
+        char[] filters = new char[] { '\n', '\"', ' ', ':', '(', ')' };
 
-        if (_string.Contains("(") && !_string.Contains(":"))
-        {
-            RemoveLast(",", ref _string);
-            _string = _string.Replace("\"", string.Empty);
-            _string = _string.Replace("(", string.Empty);
-            _string = _string.Replace(")", string.Empty);
-            _string = _string.Replace(" ", string.Empty);
-        }
-        else
+        if (!_string.Contains("Script"))
         {
             foreach (char c in filters)
             {
                 _string = _string.Replace(c.ToString(), string.Empty);
             }
         }
+        else
+        {
+            for (int i = 0; i < filters.Length - 2; i++) //Empèche la suppression des parenthèses si c'est le nom du script
+            {
+                _string = _string.Replace(filters[i].ToString(), string.Empty);
+            }
+        }
+
+        RemoveLast(",", ref _string);
+    }
+
+    static object ArrayFromString(string _stringValue, Type _arrayType)
+    {
+        _stringValue = _stringValue.Trim('[', ']');
+        string[] parts = _stringValue.Split(',');
+
+        List<object> array = (List<object>)parts.ConvertTo(_arrayType);
+
+        return null;
     }
 
     static object VectorFromString(string _stringValue, Type _vectorType)
