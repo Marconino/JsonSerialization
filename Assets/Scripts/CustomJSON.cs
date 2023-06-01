@@ -182,12 +182,53 @@ public static class CustomJSON
 
     static object ArrayFromString(string _stringValue, Type _arrayType)
     {
-        _stringValue = _stringValue.Trim('[', ']');
-        string[] parts = _stringValue.Split(',');
+        List<object> array = new List<object>();
 
-        List<object> array = (List<object>)parts.ConvertTo(_arrayType);
+        if (_stringValue != "[]")
+        {
+            _stringValue = _stringValue.Trim('[', ']');
 
-        return null;
+            Type elementType = _arrayType.IsArray ? _arrayType.GetElementType() : _arrayType.GetProperty("Item").PropertyType; //Récupère le type des éléments de la liste OU du tableau
+            string[] parts = _stringValue.Split(',');
+
+            if (elementType.Name.Contains("Vector"))
+            {
+                array = StringToVectorFormat(parts, elementType);
+            }
+            else
+            {
+                foreach (string part in parts)
+                {
+                    array.Add(Convert.ChangeType(part, elementType, CultureInfo.InvariantCulture));
+                }
+            }
+        }
+
+        return array.ConvertTo(_arrayType);
+    }
+
+    static List<object> StringToVectorFormat(string[] _stringValue, Type _vectorType)
+    {
+        int vecDimension = _vectorType == typeof(Vector2) ? 2 : _vectorType == typeof(Vector3) ? 3 : _vectorType == typeof(Vector4) ? 4 : 0;
+        string currentVector = string.Empty;
+        List<object> arrayVector = new List<object>();
+
+        for(int i = 0; i < _stringValue.Length + 1; i++)
+        {
+            if (i != 0 && i % vecDimension == 0)
+            {
+                RemoveLast(",", ref currentVector);
+                arrayVector.Add(VectorFromString(currentVector, _vectorType));
+
+                if (i < _stringValue.Length)
+                currentVector = _stringValue[i] + ",";
+            }
+            else
+            {
+                currentVector += _stringValue[i] + ",";
+            }
+        }
+        return arrayVector;
     }
 
     static object VectorFromString(string _stringValue, Type _vectorType)
@@ -221,7 +262,6 @@ public static class CustomJSON
             case 4: vector = new Vector4(values[0], values[1], values[2], values[3]); break;
         }
         
-        Type type = vector.GetType();
         return vector;
     }
 

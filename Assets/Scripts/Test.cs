@@ -24,6 +24,7 @@ public class Test : MonoBehaviour
     Vector3Int test8 = new Vector3Int(40, 96, 78);
     Vector3 test9 = new Vector3(14589.4f, 12.0f, 79.7f);
     Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
+    [JSONRead] List<int> testListInt = new List<int>() { 50, 100, 200 };
     [JSONRead] int[] testArrayInt = new int[] { 5, 10, 20 };
     [JSONRead] List<float> test11 = new List<float>();
     [JSONRead] List<int> test12 = new List<int>();
