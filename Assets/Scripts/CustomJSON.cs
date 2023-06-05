@@ -10,6 +10,7 @@ using UnityEngine;
 using System.ComponentModel;
 using static UnityEditor.MaterialProperty;
 using System.Globalization;
+using UnityEditor;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute
@@ -142,6 +143,11 @@ public static class CustomJSON
                             {
                                 value = ArrayFromString(parts[1], field.FieldType);
                             }
+                            else if (field.FieldType.IsEnum)
+                            {
+                              // value= parts[1].ConvertTo(field.FieldType);
+                                value = Enum.Parse(field.FieldType, parts[1]);
+                            }
                             else
                             {
                                 value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
@@ -177,6 +183,7 @@ public static class CustomJSON
             }
         }
 
+        if (_string[_string.Length - 1] == ',')
         RemoveLast(",", ref _string);
     }
 
@@ -285,7 +292,7 @@ public static class CustomJSON
 
     static string ParseEnum(JSONObject _jsonObject)
     {
-        string value = _jsonObject.type + "." + _jsonObject.obj;
+        string value = _jsonObject.obj.ToString();
 
         string returnStr = string.Empty;
         if (_jsonObject.fieldInfo == null)
