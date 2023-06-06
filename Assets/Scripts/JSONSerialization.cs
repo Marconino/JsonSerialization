@@ -4,13 +4,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Serialization.Formatters;
 using Unity.VisualScripting;
 using UnityEngine;
-using System.ComponentModel;
-using static UnityEditor.MaterialProperty;
 using System.Globalization;
-using UnityEditor;
+using TMPro;
+using System.Runtime.Serialization.Formatters;
+using System.Data;
+using Newtonsoft.Json.Linq;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute {}
@@ -20,10 +20,19 @@ public class JSONObject
     public FieldInfo fieldInfo;
     public Type type;
     public object obj;
+    public string fieldName = string.Empty;
 
     public JSONObject(FieldInfo _fieldInfo, Type _type, object _obj)
     {
         fieldInfo = _fieldInfo;
+        type = _type;
+        obj = _obj;
+    }
+
+    public JSONObject(string _name, Type _type, object _obj)
+    {
+        fieldName = _name;
+        fieldInfo = null;
         type = _type;
         obj = _obj;
     }
@@ -275,8 +284,10 @@ public static class JSONSerialization
         }
 
         string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null)
+        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
             returnStr = value + ", ";
+        else if (_jsonObject.fieldName != string.Empty)
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
         else
             returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : " + value + "\n";
 
@@ -288,8 +299,10 @@ public static class JSONSerialization
         string value = _jsonObject.obj.ToString();
 
         string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null)
+        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
             returnStr = "\"" + value + "\", ";
+        else if (_jsonObject.fieldName != string.Empty)
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
         else
             returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + value + "\"\n";
 
@@ -299,8 +312,10 @@ public static class JSONSerialization
     static string ParseValueType(JSONObject _jsonObject)
     {
         string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null)
+        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
             returnStr = "\"" + _jsonObject.obj + "\", ";
+        else if (_jsonObject.fieldName != string.Empty)
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + _jsonObject.obj + "\",\n";
         else
             returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + _jsonObject.obj + "\"\n";
 
@@ -325,7 +340,7 @@ public static class JSONSerialization
                 {
                     Type type = item.GetType();
 
-                    JSONObject itemJSONObject = new JSONObject(null, type, item);
+                    JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
                     value += Parse(itemJSONObject);
 
                 }
@@ -336,50 +351,53 @@ public static class JSONSerialization
         }
         else if (_jsonObject.type.Name == "String")
         {
-            //string returnStr = string.Empty;
-
-            //returnStr =  _jsonObject.obj + "\n";
-
             value += "\"" + _jsonObject.obj + "\"\n";
         }
         else if (_jsonObject.type.Name.Contains("GameObject"))
         {
-            //value += "{ ";
-            //GameObject go = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
-            ////nameGo, component, children, transform, pos
 
-            //object[] gameobjectElements = new object[3];
+            /*
+            TODO Save GameObject :
 
-            //gameobjectElements[0] = go.name;
-            //gameobjectElements[1] = go.GetComponents<Component>();
+            -Components
+            -Tag
+            -Layer
+            -Name
+            -IsActive
+            -Children
 
-            //List<int> indices = Enumerable.Range(0, go.transform.childCount).ToList();
-            //Transform[] children = new Transform[go.transform.childCount];
+            */
+            value += "\n{";
 
-            //indices.ForEach(index => { children[index] = go.transform.GetChild(index); });
+            GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
+            value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
 
-            //gameobjectElements[2] = children;
+            Component[] components = gameObject.GetComponents<Component>();
 
-            //foreach (object item in gameobjectElements)
-            //{
-            //    Type type = item.GetType();
+            value += "\"Components\" : " + components.Length + ",\n";
+            foreach(Component component in components)
+            {
+                Type type = component.GetType();
+                PropertyInfo[] properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
-            //    JSONObject itemJSONObject = new JSONObject(null, type, _jsonObject.scriptTargeted, item);
+                value += "\"" + type + "\" : \n{ ";
 
-            //    if (type.Name == "String")
-            //        value += "GameObject : " + Parse(itemJSONObject);
-            //    else
-            //        value += Parse(itemJSONObject);
-
-            //    if (type.Name.Contains("Vector"))
-            //        RemoveLast(",", ref value);
-
-            //    RemoveLast("\n", ref value);
-            //    value += ", ";
-            //}
-
-            //RemoveLast(",", ref value);
-            //value += " }\n";
+                foreach (PropertyInfo property in properties)
+                {
+                    if (!property.Name.Contains("root"))
+                    {
+                        object propertyValue = property.GetValue(component);
+                        if (propertyValue == null)
+                            value += "\"" + property.Name + "\" : null,";
+                        else
+                            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+                    }
+                }
+                RemoveLast(",", ref value);
+                value += "},\n";
+            }
+            RemoveLast(",", ref value);
+            value += "\n}\n";
         }
         else
         {
@@ -420,7 +438,7 @@ public static class JSONSerialization
             {
                 Type type = item.GetType();
 
-                JSONObject itemJSONObject = new JSONObject(null, type, item);
+                JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
                 value += Parse(itemJSONObject);
             }
         }
