@@ -13,10 +13,7 @@ using System.Globalization;
 using UnityEditor;
 
 [AttributeUsage(AttributeTargets.Field)]
-public class JSONRead : Attribute
-{
-
-}
+public class JSONRead : Attribute {}
 
 public class JSONObject
 {
@@ -32,12 +29,12 @@ public class JSONObject
     }
 }
 
-public static class CustomJSON
+public static class JSONSerialization
 {
-    static Dictionary<object, List<JSONObject>> jsonObjects = new Dictionary<object, List<JSONObject>>();
+    static Dictionary<MonoBehaviour, List<JSONObject>> jsonObjects = new Dictionary<MonoBehaviour, List<JSONObject>>();
     //public static List<JSONObject> listObjects = new List<JSONObject>();
 
-    public static void GetJSONObjects(object _script)
+    public static void GetJSONObjects(MonoBehaviour _script)
     {
         Type scriptType = _script.GetType();
         FieldInfo[] fields = scriptType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -68,17 +65,15 @@ public static class CustomJSON
             string json = "{\n";
 
             int index = 0;
-            foreach (object script in jsonObjects.Keys)
+            foreach (MonoBehaviour script in jsonObjects.Keys)
             {
-                MonoBehaviour monoBehaviour = script as MonoBehaviour;
-
                 if (index == 0)
                 {
-                    json += "\"Script : " + monoBehaviour.name + "\" : \n{\n";
+                    json += "\"Script : " + script.name + "\" : \n{\n";
                 }
                 else
                 {
-                    json += ",\n\"Script : " + monoBehaviour.name + "\" : \n{\n";
+                    json += ",\n\"Script : " + script.name + "\" : \n{\n";
                 }
 
                 foreach (JSONObject jsonObject in jsonObjects[script])
@@ -101,7 +96,7 @@ public static class CustomJSON
         }
     }
 
-    public static void Load(string _filename, List<MonoBehaviour> _scripts)
+    public static void Load(string _filename)
     {
         using (StreamReader stream = new StreamReader(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
         {
@@ -114,7 +109,8 @@ public static class CustomJSON
                 {
                     string scriptName = currLine;
                     Filter(ref scriptName);
-                    MonoBehaviour script = _scripts.Find(n => n.name == scriptName);
+                    
+                    MonoBehaviour script = jsonObjects.First(n => n.Key.name == scriptName).Key;
                     Type scriptType = script.GetType();
 
                     do

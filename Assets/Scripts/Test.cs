@@ -5,7 +5,7 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-enum TestSave
+public enum TestSave
 {
     OUI,
     NON
@@ -23,23 +23,23 @@ public class Test : MonoBehaviour
     Vector2Int test7 = new Vector2Int(90, 100);
     Vector3Int test8 = new Vector3Int(40, 96, 78);
     Vector3 test9 = new Vector3(14589.4f, 12.0f, 79.7f);
-    Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
-    [JSONRead] List<int> testListInt = new List<int>() { 50, 100, 200 };
-    [JSONRead] int[] testArrayInt = new int[] { 5, 10, 20 };
-    [JSONRead] List<float> test11 = new List<float>();
-    [JSONRead] List<int> test12 = new List<int>();
-    [JSONRead] List<double> test13 = new List<double>();
-    [JSONRead] List<long> test14 = new List<long>();
-    [JSONRead] List<bool> test15 = new List<bool>();
-    [JSONRead] List<Vector2> test16 = new List<Vector2>();
-    [JSONRead] List<Vector2Int> test17 = new List<Vector2Int>();
-    [JSONRead] List<Vector3Int> test18 = new List<Vector3Int>();
-    [JSONRead] List<Vector3> test19 = new List<Vector3>();
-    [JSONRead] List<Vector4> test20 = new List<Vector4>();
+    [SerializeField]Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
+     List<int> testListInt = new List<int>() { 50, 100, 200 };
+    [JSONRead][SerializeField] int[] testArrayInt = new int[] { 5, 10, 20 };
+     List<float> test11 = new List<float>();
+     List<int> test12 = new List<int>();
+     List<double> test13 = new List<double>();
+     List<long> test14 = new List<long>();
+     List<bool> test15 = new List<bool>();
+     List<Vector2> test16 = new List<Vector2>();
+     List<Vector2Int> test17 = new List<Vector2Int>();
+     List<Vector3Int> test18 = new List<Vector3Int>();
+     List<Vector3> test19 = new List<Vector3>();
+     List<Vector4> test20 = new List<Vector4>();
     [SerializeField]  GameObject test21;
      List<GameObject> test22;
-    [JSONRead] TestSave test23 = TestSave.NON;
-    [JSONRead] TestSave[] test24;
+     TestSave[] test23 = new TestSave[] { TestSave.NON, TestSave.OUI, TestSave.NON };
+    //[JSONRead] TestSave[] test24;
 
     // Start is called before the first frame update
     void Start()
@@ -70,12 +70,12 @@ public class Test : MonoBehaviour
         test16.Add(new Vector2(14.7f, 978.5f));
         test16.Add(new Vector2(4.1f, 98.147f));
 
-        test24 = new TestSave[3];
-        test24[0] = TestSave.OUI;
-        test24[1] = TestSave.NON;
-        test24[2] = TestSave.OUI;
+        //test24 = new TestSave[3];
+        //test24[0] = TestSave.OUI;
+        //test24[1] = TestSave.NON;
+        //test24[2] = TestSave.OUI;
         
-        //CustomJSON.GetJSONObjects(this);
+        JSONSerialization.GetJSONObjects(this);
 
         //CustomJSON.Save("TestSave");
         //CustomJSON.Load("TestSave");

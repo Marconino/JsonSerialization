@@ -123,53 +123,6 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &22935489
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 22935490}
-  - component: {fileID: 22935491}
-  m_Layer: 0
-  m_Name: '@JSONManager'
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &22935490
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 22935489}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_RootOrder: 5
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &22935491
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 22935489}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2cd00aa3eec751b44ae31110c0fbff57, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  scripts:
-  - {fileID: 1906140248}
-  - {fileID: 1033072271}
 --- !u!1 &413043648
 GameObject:
   m_ObjectHideFlags: 0
@@ -264,7 +217,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_RootOrder: 6
+  m_RootOrder: 5
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &641841450
 MonoBehaviour:
@@ -485,6 +438,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: de91d508282f91e4d9f9a6f678861226, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  test10: {x: 14589.4, y: 12, z: 79.7, w: 97889.56}
+  testArrayInt: 050000000a00000014000000
   test21: {fileID: 413043648}
 --- !u!4 &1033072272
 Transform:
@@ -561,6 +516,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: de91d508282f91e4d9f9a6f678861226, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  test10: {x: 12076.1, y: 76.89, z: -23891.8, w: 112656}
+  testArrayInt: 050000000a00000014000000
   test21: {fileID: 413043648}
 --- !u!4 &1906140249
 Transform:
