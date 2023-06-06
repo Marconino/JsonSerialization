@@ -78,7 +78,7 @@ public static class CustomJSON
                 }
                 else
                 {
-                    json += ",\"Script : " + monoBehaviour.name + "\" : \n{\n";
+                    json += ",\n\"Script : " + monoBehaviour.name + "\" : \n{\n";
                 }
 
                 foreach (JSONObject jsonObject in jsonObjects[script])
@@ -109,12 +109,13 @@ public static class CustomJSON
         {
             string currLine = stream.ReadLine();
             currLine = stream.ReadLine(); //For first {
+            List<string> scriptsName = _scripts.Select(monoBehaviour => monoBehaviour.name).ToList();
 
             while (!stream.EndOfStream)
             {
                 if (currLine.Contains("Script"))
                 {
-                    string scriptName = currLine.Substring(currLine.IndexOf(':') + 2);
+                    string scriptName = currLine;
                     Filter(ref scriptName);
                     MonoBehaviour script = _scripts.Find(n => n.name == scriptName);
                     Type scriptType = script.GetType();
@@ -145,7 +146,6 @@ public static class CustomJSON
                             }
                             else if (field.FieldType.IsEnum)
                             {
-                              // value= parts[1].ConvertTo(field.FieldType);
                                 value = Enum.Parse(field.FieldType, parts[1]);
                             }
                             else
@@ -166,7 +166,7 @@ public static class CustomJSON
 
     static void Filter(ref string _string)
     {
-        char[] filters = new char[] { '\n', '\"', ' ', ':', '(', ')' };
+        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')' };
 
         if (!_string.Contains("Script"))
         {
@@ -174,17 +174,17 @@ public static class CustomJSON
             {
                 _string = _string.Replace(c.ToString(), string.Empty);
             }
+
+            if (_string[_string.Length - 1] == ',')
+                RemoveLast(",", ref _string);
         }
         else
         {
-            for (int i = 0; i < filters.Length - 2; i++) //Empèche la suppression des parenthèses si c'est le nom du script
-            {
-                _string = _string.Replace(filters[i].ToString(), string.Empty);
-            }
+            _string = _string.Substring(_string.IndexOf(':') + 2);
+            RemoveLast("\"", ref _string);
         }
 
-        if (_string[_string.Length - 1] == ',')
-        RemoveLast(",", ref _string);
+
     }
 
     static object ArrayFromString(string _stringValue, Type _arrayType)
