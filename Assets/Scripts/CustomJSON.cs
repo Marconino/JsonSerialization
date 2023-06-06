@@ -103,13 +103,10 @@ public static class CustomJSON
 
     public static void Load(string _filename, List<MonoBehaviour> _scripts)
     {
-        jsonObjects.Clear();
-
         using (StreamReader stream = new StreamReader(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
         {
             string currLine = stream.ReadLine();
             currLine = stream.ReadLine(); //For first {
-            List<string> scriptsName = _scripts.Select(monoBehaviour => monoBehaviour.name).ToList();
 
             while (!stream.EndOfStream)
             {
