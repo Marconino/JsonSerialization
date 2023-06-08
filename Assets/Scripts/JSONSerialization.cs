@@ -7,13 +7,11 @@ using System.Reflection;
 using Unity.VisualScripting;
 using UnityEngine;
 using System.Globalization;
-using TMPro;
-using System.Runtime.Serialization.Formatters;
-using System.Data;
-using Newtonsoft.Json.Linq;
+using System.Runtime.InteropServices.ComTypes;
+using UnityEngine.Tilemaps;
 
 [AttributeUsage(AttributeTargets.Field)]
-public class JSONRead : Attribute {}
+public class JSONRead : Attribute { }
 
 public class JSONObject
 {
@@ -118,7 +116,7 @@ public static class JSONSerialization
                 {
                     string scriptName = currLine;
                     Filter(ref scriptName);
-                    
+
                     MonoBehaviour script = jsonObjects.First(n => n.Key.name == scriptName).Key;
                     Type scriptType = script.GetType();
 
@@ -142,13 +140,18 @@ public static class JSONSerialization
                             {
                                 value = VectorFromString(parts[1], field.FieldType);
                             }
-                            else if(field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
+                            else if (field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
                             {
                                 value = ArrayFromString(parts[1], field.FieldType);
                             }
                             else if (field.FieldType.IsEnum)
                             {
                                 value = Enum.Parse(field.FieldType, parts[1]);
+                            }
+                            else if (field.FieldType == typeof(GameObject))
+                            {
+                                value = GameObjectFromString(ref currLine, stream);
+                                Debug.Log("test");
                             }
                             else
                             {
@@ -168,7 +171,7 @@ public static class JSONSerialization
 
     static void Filter(ref string _string)
     {
-        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')' };
+        char[] filters = new char[] { '\n', '\"', ':', ' '};
 
         if (!_string.Contains("Script"))
         {
@@ -187,6 +190,70 @@ public static class JSONSerialization
         }
 
 
+    }
+
+    static object GameObjectFromString(ref string _currLine, StreamReader _stream)
+    {
+        GameObject go = new GameObject();
+        go.hideFlags = HideFlags.HideAndDontSave;
+
+        object returnGo = null;
+        int step = 0;
+        int componentsCount = 0;
+
+        do
+        {
+            _currLine = _stream.ReadLine();
+            string value = _currLine.Remove(0,_currLine.IndexOf(':'));
+            Filter(ref value);
+
+            switch(step)
+            {
+                case 0: go.name = value; break;
+                case 1: go.tag = value; break;
+                case 2: go.layer = int.Parse(value); break;
+                case 3: go.SetActive(bool.Parse(value)); break;
+                case 4: componentsCount = int.Parse(value); break;
+            } 
+            step++;
+
+        } while (step < 5); //Name, Tag, Layer, IsActive, Nb Components
+
+        step = 0;
+
+        _currLine = _stream.ReadLine();
+        string componentName = _currLine;
+        Filter(ref componentName);
+        componentName += ",UnityEngine"; //Pour le formattage
+        Type componentType = Type.GetType(componentName);
+
+        PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
+        foreach(PropertyInfo property in properties)
+        {
+            if (!property.Name.Contains("root"))
+            {
+                _currLine = _stream.ReadLine();
+                _currLine = _stream.ReadLine();
+                string[] parts = _currLine.Split(':');
+
+                for (int i = 0; i < parts.Length; i++)
+                {
+                    Filter(ref parts[i]);
+                }
+
+                if (property.Name == parts[0])
+                {
+                    
+                    object test = parts[1].ConvertTo(property.PropertyType); 
+                    property.SetValue(go, parts[1]);
+                }
+            }
+        }
+
+        //go.AddComponent()
+
+        return null;
     }
 
     static object ArrayFromString(string _stringValue, Type _arrayType)
@@ -222,7 +289,7 @@ public static class JSONSerialization
         string currentVector = string.Empty;
         List<object> arrayVector = new List<object>();
 
-        for(int i = 0; i < _stringValue.Length + 1; i++)
+        for (int i = 0; i < _stringValue.Length + 1; i++)
         {
             if (i != 0 && i % vecDimension == 0)
             {
@@ -230,7 +297,7 @@ public static class JSONSerialization
                 arrayVector.Add(VectorFromString(currentVector, _vectorType));
 
                 if (i < _stringValue.Length)
-                currentVector = _stringValue[i] + ",";
+                    currentVector = _stringValue[i] + ",";
             }
             else
             {
@@ -254,7 +321,7 @@ public static class JSONSerialization
 
         object vector = Activator.CreateInstance(_vectorType);
 
-        switch(parts.Length)
+        switch (parts.Length)
         {
             case 2:
                 if (hasFloat)
@@ -270,7 +337,7 @@ public static class JSONSerialization
                 break;
             case 4: vector = new Vector4(values[0], values[1], values[2], values[3]); break;
         }
-        
+
         return vector;
     }
 
@@ -312,14 +379,31 @@ public static class JSONSerialization
     static string ParseValueType(JSONObject _jsonObject)
     {
         string returnStr = string.Empty;
+
         if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
             returnStr = "\"" + _jsonObject.obj + "\", ";
         else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + _jsonObject.obj + "\",\n";
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + (_jsonObject.type == typeof(Matrix4x4) ? ParseMatrix4x4(_jsonObject) : _jsonObject.obj) + "\",\n";
         else
             returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + _jsonObject.obj + "\"\n";
 
         return returnStr;
+    }
+
+    static string ParseMatrix4x4(JSONObject _jsonObject)
+    {
+        string value = string.Empty;
+
+        Matrix4x4 matrix4x4 = (Matrix4x4)_jsonObject.obj.ConvertTo(typeof(Matrix4x4));
+        Vector4[] rows = new Vector4[4];
+        
+        for (int i = 0; i < 4; i++)
+        {
+            rows[i] = matrix4x4.GetRow(i);
+            value += rows[i].ToString() + "|";
+        }
+        RemoveLast("|", ref value);
+        return value;
     }
 
     static string ParseClass(JSONObject _jsonObject)
@@ -367,7 +451,7 @@ public static class JSONSerialization
             -Children
 
             */
-            value += "\n{";
+            value += "{";
 
             GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
             value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
@@ -375,12 +459,12 @@ public static class JSONSerialization
             Component[] components = gameObject.GetComponents<Component>();
 
             value += "\"Components\" : " + components.Length + ",\n";
-            foreach(Component component in components)
+            foreach (Component component in components)
             {
                 Type type = component.GetType();
                 PropertyInfo[] properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
-                value += "\"" + type + "\" : \n{ ";
+                value += "\"" + type + "\" : \n{\n";
 
                 foreach (PropertyInfo property in properties)
                 {
@@ -388,7 +472,7 @@ public static class JSONSerialization
                     {
                         object propertyValue = property.GetValue(component);
                         if (propertyValue == null)
-                            value += "\"" + property.Name + "\" : null,";
+                            value += "\"" + property.Name + "\" : null,\n";
                         else
                             value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
                     }
@@ -398,25 +482,6 @@ public static class JSONSerialization
             }
             RemoveLast(",", ref value);
             value += "\n}\n";
-        }
-        else
-        {
-            value += "Component : " + "\"" + _jsonObject.type + "\" { ";
-
-            PropertyInfo[] properties = _jsonObject.type.GetProperties(BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-
-            foreach (PropertyInfo property in properties)
-            {
-                object propertyValue = property.GetValue(_jsonObject.obj);
-                if (propertyValue == null)
-                    value += property.Name + " : null, ";
-                else
-                    value += property.Name + " : " + propertyValue + ", ";
-
-                RemoveLast("\n", ref value);
-            }
-            RemoveLast(",", ref value);
-            value += " }, ";
         }
         return value;
     }
