@@ -157,7 +157,7 @@ public static class JSONSerialization
                             }
                             else
                             {
-                                value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
+                                value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier paramï¿½tre pour que la virgule soit considï¿½rï¿½ comme un point
                             }
                             
                             if (!isGameObject)
@@ -167,7 +167,7 @@ public static class JSONSerialization
                     } while (!currLine.Contains("}"));
                     currLine = stream.ReadLine();
                 }
-                else if (currLine.Contains("}")) //EndOfFile
+                else if (currLine.Contains("}")) //EndOfObject
                 {
                     currLine = stream.ReadLine();
                 }
@@ -201,9 +201,6 @@ public static class JSONSerialization
 
     static object GameObjectFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
     {
-        //GameObject go = new GameObject();
-        //go.hideFlags = HideFlags.DontSave;
-
         int step = 0;
         int componentsCount = 0;
 
@@ -228,6 +225,8 @@ public static class JSONSerialization
         _currLine = _stream.ReadLine();
 
         Component[] components = _go.GetComponents<Component>();
+        string[] children = null;
+
         for (int i = 0; i < componentsCount; i++)
         {
             string componentName = _currLine;
@@ -239,9 +238,8 @@ public static class JSONSerialization
 
             PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
-
             _currLine = _stream.ReadLine();
-            _currLine = _stream.ReadLine(); //Je mets le curseur sur la première propriété
+            _currLine = _stream.ReadLine(); //Je mets le curseur sur la premiï¿½re propriï¿½tï¿½
 
             foreach (PropertyInfo property in properties)
             {
@@ -277,23 +275,37 @@ public static class JSONSerialization
                         {
                             value = Enum.Parse(property.PropertyType, parts[1]);
                         }
+
                         else if (property.PropertyType == typeof(Transform))
                         {
-                            value = null;
+                            value = parts[1].Equals("null") ? null : _go.transform.parent;
                         }
                         else
                         {
-                            value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
+                            value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier paramï¿½tre pour que la virgule soit considï¿½rï¿½ comme un point
                         }
 
                         property.SetValue(currComponent, value);
+                    }
+                    else if (property.Name.Contains("childCount"))
+                    {
+                        children = (string[])ArrayFromString(parts[1], typeof(string[]));
+                        if (children[0].Contains("0"))
+                            children = new string[0];
                     }
                     _currLine = _stream.ReadLine();
                 }
             }
             _currLine = _stream.ReadLine();
         }
-        
+
+        for (int j = 0; j < children.Length; j++)
+        {
+            GameObject child = _go.transform.GetChild(j).gameObject;
+            GameObjectFromString(ref _currLine, _stream, ref child);
+            _currLine = _stream.ReadLine();
+        }
+
         return _go;
     }
 
@@ -318,7 +330,7 @@ public static class JSONSerialization
         {
             _stringValue = _stringValue.Trim('[', ']');
 
-            Type elementType = _arrayType.IsArray ? _arrayType.GetElementType() : _arrayType.GetProperty("Item").PropertyType; //Récupère le type des éléments de la liste OU du tableau
+            Type elementType = _arrayType.IsArray ? _arrayType.GetElementType() : _arrayType.GetProperty("Item").PropertyType; //Rï¿½cupï¿½re le type des ï¿½lï¿½ments de la liste OU du tableau
             string[] parts = _stringValue.Split(',');
 
             if (elementType.Name.Contains("Vector"))
@@ -478,6 +490,8 @@ public static class JSONSerialization
 
         if (_jsonObject.fieldInfo != null)
             value = "\"" + _jsonObject.fieldInfo.Name + "\" : ";
+        else
+            value = "\"" + _jsonObject.fieldName + "\" : ";
 
         if (_jsonObject.type.Name.Contains("List"))
         {
@@ -523,30 +537,72 @@ public static class JSONSerialization
             value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
 
             Component[] components = gameObject.GetComponents<Component>();
+            bool isChild = _jsonObject.fieldName.Contains("Child");
 
             value += "\"Components\" : " + components.Length + ",\n";
-            foreach (Component component in components)
+            for (int i = 0; i < components.Length; i++)
             {
-                Type type = component.GetType();
-                PropertyInfo[] properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                Component component = components[i];
+                Type componentType = component.GetType();
+                PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
-                value += "\"" + type + "\" : \n{\n";
+                value += "\"" + componentType + "\" : \n{\n";
 
                 foreach (PropertyInfo property in properties)
                 {
                     if (!property.Name.Contains("root"))
                     {
                         object propertyValue = property.GetValue(component);
+
                         if (propertyValue == null)
                             value += "\"" + property.Name + "\" : null,\n";
+                        else if (property.Name.Contains("childCount"))
+                        {
+                            int childrenCount = (int)propertyValue.ConvertTo(typeof(int));
+                            value += "\"" + property.Name + "\"" + ": ";
+
+                            if (childrenCount > 0)
+                            {
+                                value += "[";
+                                for (int j = 0; j < childrenCount; j++)
+                                {
+                                    value += "\"" + component.transform.GetChild(j).ToString() + "\",";
+                                }
+                                RemoveLast(",", ref value);
+                                value += "],";
+                            }
+                            else
+                            {
+                                value += "0,";
+                            }
+                            value += "\n";
+                        }
+                        else if (property.Name.Contains("parent"))
+                        {
+                            value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
+                        }
                         else
-                            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+                            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue ));
                     }
                 }
                 RemoveLast(",", ref value);
                 value += "\n},\n";
+
+                if (i + 1 == components.Length) //Children
+                {
+                    int childrenCount = gameObject.transform.childCount;
+
+                    for (int j = 0; j < childrenCount; j++)
+                    {
+                        value += Parse(new JSONObject("Child " + j, typeof(GameObject), gameObject.transform.GetChild(j).gameObject));
+                    }
+                }
             }
             RemoveLast(",", ref value);
+
+            if (isChild)
+            value += "\n},\n";
+            else
             value += "\n}\n";
         }
         return value;
