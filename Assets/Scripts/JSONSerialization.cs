@@ -126,6 +126,7 @@ public static class JSONSerialization
 
                         if (currLine.Contains(":"))
                         {
+                            bool isGameObject = false;
                             string[] parts = currLine.Split(':');
 
                             for (int i = 0; i < parts.Length; i++)
@@ -150,18 +151,24 @@ public static class JSONSerialization
                             }
                             else if (field.FieldType == typeof(GameObject))
                             {
-                                value = GameObjectFromString(ref currLine, stream);
-                                Debug.Log("test");
+                                isGameObject = true;
+                                GameObject go = (GameObject)field.GetValue(script).ConvertTo(typeof(GameObject));
+                                GameObjectFromString(ref currLine, stream, ref go);
                             }
                             else
                             {
                                 value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
                             }
-
+                            
+                            if (!isGameObject)
                             field.SetValue(script, value);
                         }
 
                     } while (!currLine.Contains("}"));
+                    currLine = stream.ReadLine();
+                }
+                else if (currLine.Contains("}")) //EndOfFile
+                {
                     currLine = stream.ReadLine();
                 }
             }
@@ -171,7 +178,7 @@ public static class JSONSerialization
 
     static void Filter(ref string _string)
     {
-        char[] filters = new char[] { '\n', '\"', ':', ' '};
+        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')'};
 
         if (!_string.Contains("Script"))
         {
@@ -192,12 +199,11 @@ public static class JSONSerialization
 
     }
 
-    static object GameObjectFromString(ref string _currLine, StreamReader _stream)
+    static object GameObjectFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
     {
-        GameObject go = new GameObject();
-        go.hideFlags = HideFlags.HideAndDontSave;
+        //GameObject go = new GameObject();
+        //go.hideFlags = HideFlags.DontSave;
 
-        object returnGo = null;
         int step = 0;
         int componentsCount = 0;
 
@@ -209,51 +215,99 @@ public static class JSONSerialization
 
             switch(step)
             {
-                case 0: go.name = value; break;
-                case 1: go.tag = value; break;
-                case 2: go.layer = int.Parse(value); break;
-                case 3: go.SetActive(bool.Parse(value)); break;
+                case 0: _go.name = value; break;
+                case 1: _go.tag = value; break;
+                case 2: _go.layer = int.Parse(value); break;
+                case 3: _go.SetActive(bool.Parse(value)); break;
                 case 4: componentsCount = int.Parse(value); break;
             } 
             step++;
 
         } while (step < 5); //Name, Tag, Layer, IsActive, Nb Components
 
-        step = 0;
-
         _currLine = _stream.ReadLine();
-        string componentName = _currLine;
-        Filter(ref componentName);
-        componentName += ",UnityEngine"; //Pour le formattage
-        Type componentType = Type.GetType(componentName);
 
-        PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-
-        foreach(PropertyInfo property in properties)
+        Component[] components = _go.GetComponents<Component>();
+        for (int i = 0; i < componentsCount; i++)
         {
-            if (!property.Name.Contains("root"))
+            string componentName = _currLine;
+            Filter(ref componentName);
+            componentName += ",UnityEngine"; //Pour le formattage
+            Type componentType = Type.GetType(componentName);          
+
+            Component currComponent = components.FirstOrDefault(n => n.GetType() == componentType) ?? _go.AddComponent(componentType);
+
+            PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
+
+            _currLine = _stream.ReadLine();
+            _currLine = _stream.ReadLine(); //Je mets le curseur sur la première propriété
+
+            foreach (PropertyInfo property in properties)
             {
-                _currLine = _stream.ReadLine();
-                _currLine = _stream.ReadLine();
-                string[] parts = _currLine.Split(':');
-
-                for (int i = 0; i < parts.Length; i++)
+                if (!property.Name.Contains("root"))
                 {
-                    Filter(ref parts[i]);
-                }
+                    string[] parts = _currLine.Split(':');
 
-                if (property.Name == parts[0])
-                {
-                    
-                    object test = parts[1].ConvertTo(property.PropertyType); 
-                    property.SetValue(go, parts[1]);
+                    for (int j = 0; j < parts.Length; j++)
+                    {
+                        Filter(ref parts[j]);
+                    }
+
+                    if (property.Name == parts[0] && property.CanWrite)
+                    {
+                        object value = null;
+                        if (property.PropertyType.Name.Contains("Vector"))
+                        {
+                            value = VectorFromString(parts[1], property.PropertyType);
+                        }
+                        else if (property.PropertyType.Name.Contains("Quaternion"))
+                        {
+                            value = QuaternionFromString(parts[1]);
+                        }
+                        else if (property.PropertyType == typeof(Matrix4x4))
+                        {
+                            value = Matrix4x4FromString(parts[1]);
+                        }
+                        else if (property.PropertyType.Name.Contains("List") || property.PropertyType.IsArray)
+                        {
+                            value = ArrayFromString(parts[1], property.PropertyType);
+                        }
+                        else if (property.PropertyType.IsEnum)
+                        {
+                            value = Enum.Parse(property.PropertyType, parts[1]);
+                        }
+                        else if (property.PropertyType == typeof(Transform))
+                        {
+                            value = null;
+                        }
+                        else
+                        {
+                            value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier paramètre pour que la virgule soit considéré comme un point
+                        }
+
+                        property.SetValue(currComponent, value);
+                    }
+                    _currLine = _stream.ReadLine();
                 }
             }
+            _currLine = _stream.ReadLine();
+        }
+        
+        return _go;
+    }
+
+    static object Matrix4x4FromString(string _stringValue)
+    {
+        string[] parts = _stringValue.Split('|');
+        Matrix4x4 matrix4X4 = new Matrix4x4();
+
+        for (int i = 0; i < 4; i++)
+        {
+            matrix4X4.SetRow(i, (Vector4)VectorFromString(parts[i], typeof(Vector4)).ConvertTo(typeof(Vector4)));
         }
 
-        //go.AddComponent()
-
-        return null;
+        return matrix4X4;
     }
 
     static object ArrayFromString(string _stringValue, Type _arrayType)
@@ -305,6 +359,18 @@ public static class JSONSerialization
             }
         }
         return arrayVector;
+    }
+
+    static object QuaternionFromString(string _stringValue)
+    {
+        string[] parts = _stringValue.Split(',');
+        float[] values = new float[parts.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out values[i]);
+        }
+
+        return new Quaternion(values[0], values[1], values[2], values[3]);
     }
 
     static object VectorFromString(string _stringValue, Type _vectorType)
@@ -478,7 +544,7 @@ public static class JSONSerialization
                     }
                 }
                 RemoveLast(",", ref value);
-                value += "},\n";
+                value += "\n},\n";
             }
             RemoveLast(",", ref value);
             value += "\n}\n";

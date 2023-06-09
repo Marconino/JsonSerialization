@@ -1,10 +1,130 @@
 {
 "Script : Test (1)" : 
 {
-"testArrayInt" : [555, 111, 222]
+"test10" : "(14589.40, 12.00, 79.70, 97889.56)",
+"testArrayInt" : [5, 10, 20],
+"test21" : {
+"GO_Name" : "TestGOSaved",
+"GO_Tag" : "Untagged",
+"GO_Layer" : 0,
+"GO_IsActive" : true,
+"Components" : 2,
+"UnityEngine.Transform" : 
+{
+"position" : "(0.00, -163.30, 0.00)",
+"localPosition" : "(0.00, -163.30, 0.00)",
+"eulerAngles" : "(305.14, 0.00, 312.89)",
+"localEulerAngles" : "(305.14, 0.00, 312.89)",
+"right" : "(0.68, -0.42, 0.60)",
+"up" : "(0.73, 0.39, -0.56)",
+"forward" : "(0.00, 0.82, 0.58)",
+"rotation" : "(-0.42228, -0.18410, -0.35470, 0.81362)",
+"localRotation" : "(-0.42228, -0.18410, -0.35470, 0.81362)",
+"localScale" : "(1.00, 1.00, 1.00)",
+"parent" : null,
+"worldToLocalMatrix" : "(0.68, -0.42, 0.60, -68.86)|(0.73, 0.39, -0.56, 63.97)|(0.00, 0.82, 0.58, 133.54)|(0.00, 0.00, 0.00, 1.00)",
+"localToWorldMatrix" : "(0.68, 0.73, 0.00, 0.00)|(-0.42, 0.39, 0.82, -163.30)|(0.60, -0.56, 0.58, 0.00)|(0.00, 0.00, 0.00, 1.00)",
+"childCount" : "2",
+"lossyScale" : "(1.00, 1.00, 1.00)",
+"hasChanged" : "true",
+"hierarchyCapacity" : "3",
+"hierarchyCount" : "3"
+},
+"UnityEngine.Rigidbody" : 
+{
+"velocity" : "(0.00, -56.51, 0.00)",
+"angularVelocity" : "(0.00, 0.00, 0.00)",
+"drag" : "0",
+"angularDrag" : "0.05",
+"mass" : "1",
+"useGravity" : "true",
+"maxDepenetrationVelocity" : "10",
+"isKinematic" : "false",
+"freezeRotation" : "false",
+"constraints" : "None",
+"collisionDetectionMode" : "Discrete",
+"centerOfMass" : "(0.00, 0.00, 0.00)",
+"worldCenterOfMass" : "(0.00, -163.30, 0.00)",
+"inertiaTensorRotation" : "(0.00000, 0.00000, 0.00000, 1.00000)",
+"inertiaTensor" : "(1.00, 1.00, 1.00)",
+"detectCollisions" : "true",
+"position" : "(0.00, -163.30, 0.00)",
+"rotation" : "(-0.42228, -0.18410, -0.35470, 0.81362)",
+"interpolation" : "None",
+"solverIterations" : "6",
+"sleepThreshold" : "0.005",
+"maxAngularVelocity" : "7",
+"solverVelocityIterations" : "1",
+"sleepVelocity" : "0",
+"sleepAngularVelocity" : "0",
+"useConeFriction" : "false",
+"solverIterationCount" : "6",
+"solverVelocityIterationCount" : "1"
+}
+}
 },
 "Script : Test" : 
 {
-"testArrayInt" : [5, 10, 20]
+"test10" : "(12076.10, 76.89, -23891.80, 112656.00)",
+"testArrayInt" : [5, 10, 20],
+"test21" : {
+"GO_Name" : "TestGOSaved",
+"GO_Tag" : "Untagged",
+"GO_Layer" : 0,
+"GO_IsActive" : true,
+"Components" : 2,
+"UnityEngine.Transform" : 
+{
+"position" : "(0.00, -163.30, 0.00)",
+"localPosition" : "(0.00, -163.30, 0.00)",
+"eulerAngles" : "(305.14, 0.00, 312.89)",
+"localEulerAngles" : "(305.14, 0.00, 312.89)",
+"right" : "(0.68, -0.42, 0.60)",
+"up" : "(0.73, 0.39, -0.56)",
+"forward" : "(0.00, 0.82, 0.58)",
+"rotation" : "(-0.42228, -0.18410, -0.35470, 0.81362)",
+"localRotation" : "(-0.42228, -0.18410, -0.35470, 0.81362)",
+"localScale" : "(1.00, 1.00, 1.00)",
+"parent" : null,
+"worldToLocalMatrix" : "(0.68, -0.42, 0.60, -68.86)|(0.73, 0.39, -0.56, 63.97)|(0.00, 0.82, 0.58, 133.54)|(0.00, 0.00, 0.00, 1.00)",
+"localToWorldMatrix" : "(0.68, 0.73, 0.00, 0.00)|(-0.42, 0.39, 0.82, -163.30)|(0.60, -0.56, 0.58, 0.00)|(0.00, 0.00, 0.00, 1.00)",
+"childCount" : "2",
+"lossyScale" : "(1.00, 1.00, 1.00)",
+"hasChanged" : "true",
+"hierarchyCapacity" : "3",
+"hierarchyCount" : "3"
+},
+"UnityEngine.Rigidbody" : 
+{
+"velocity" : "(0.00, -56.51, 0.00)",
+"angularVelocity" : "(0.00, 0.00, 0.00)",
+"drag" : "0",
+"angularDrag" : "0.05",
+"mass" : "1",
+"useGravity" : "true",
+"maxDepenetrationVelocity" : "10",
+"isKinematic" : "false",
+"freezeRotation" : "false",
+"constraints" : "None",
+"collisionDetectionMode" : "Discrete",
+"centerOfMass" : "(0.00, 0.00, 0.00)",
+"worldCenterOfMass" : "(0.00, -163.30, 0.00)",
+"inertiaTensorRotation" : "(0.00000, 0.00000, 0.00000, 1.00000)",
+"inertiaTensor" : "(1.00, 1.00, 1.00)",
+"detectCollisions" : "true",
+"position" : "(0.00, -163.30, 0.00)",
+"rotation" : "(-0.42228, -0.18410, -0.35470, 0.81362)",
+"interpolation" : "None",
+"solverIterations" : "6",
+"sleepThreshold" : "0.005",
+"maxAngularVelocity" : "7",
+"solverVelocityIterations" : "1",
+"sleepVelocity" : "0",
+"sleepAngularVelocity" : "0",
+"useConeFriction" : "false",
+"solverIterationCount" : "6",
+"solverVelocityIterationCount" : "1"
+}
+}
 }
 }
