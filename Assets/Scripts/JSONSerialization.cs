@@ -159,9 +159,9 @@ public static class JSONSerialization
                             {
                                 value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
                             }
-                            
+
                             if (!isGameObject)
-                            field.SetValue(script, value);
+                                field.SetValue(script, value);
                         }
 
                     } while (!currLine.Contains("}"));
@@ -178,7 +178,7 @@ public static class JSONSerialization
 
     static void Filter(ref string _string)
     {
-        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')'};
+        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')' };
 
         if (!_string.Contains("Script"))
         {
@@ -207,17 +207,17 @@ public static class JSONSerialization
         do
         {
             _currLine = _stream.ReadLine();
-            string value = _currLine.Remove(0,_currLine.IndexOf(':'));
+            string value = _currLine.Remove(0, _currLine.IndexOf(':'));
             Filter(ref value);
 
-            switch(step)
+            switch (step)
             {
                 case 0: _go.name = value; break;
                 case 1: _go.tag = value; break;
                 case 2: _go.layer = int.Parse(value); break;
                 case 3: _go.SetActive(bool.Parse(value)); break;
                 case 4: componentsCount = int.Parse(value); break;
-            } 
+            }
             step++;
 
         } while (step < 5); //Name, Tag, Layer, IsActive, Nb Components
@@ -232,7 +232,7 @@ public static class JSONSerialization
             string componentName = _currLine;
             Filter(ref componentName);
             componentName += ",UnityEngine"; //Pour le formattage
-            Type componentType = Type.GetType(componentName);          
+            Type componentType = Type.GetType(componentName);
 
             Component currComponent = components.FirstOrDefault(n => n.GetType() == componentType) ?? _go.AddComponent(componentType);
 
@@ -285,7 +285,10 @@ public static class JSONSerialization
                             value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
                         }
 
-                        property.SetValue(currComponent, value);
+                        if (property.Name.Contains("hierarchyCapacity"))
+                            property.SetValue(currComponent, _go.transform.hierarchyCapacity);
+                        else
+                            property.SetValue(currComponent, value);
                     }
                     else if (property.Name.Contains("childCount"))
                     {
@@ -299,9 +302,29 @@ public static class JSONSerialization
             _currLine = _stream.ReadLine();
         }
 
+        List<Transform> childrenT = new List<Transform>();
+        for (int j = 0; j < _go.transform.childCount; j++)
+        {
+            childrenT.Add(_go.transform.GetChild(j));
+        }
+
         for (int j = 0; j < children.Length; j++)
         {
-            GameObject child = _go.transform.GetChild(j).gameObject;
+            GameObject child = null;
+
+            int siblingIndex = childrenT.FindIndex(n => n.name == children[j]);
+
+            if (siblingIndex == -1) //Si l'enfant sauvegardé n'est pas dans la hierarchie
+            {
+                child = new GameObject();
+                child.transform.SetParent(_go.transform);
+            }
+            else
+            {
+                child = childrenT[siblingIndex].gameObject;
+            }
+
+            child.transform.SetSiblingIndex(j); //Je mets l'enfant au bon index de la hierarchie
             GameObjectFromString(ref _currLine, _stream, ref child);
             _currLine = _stream.ReadLine();
         }
@@ -474,7 +497,7 @@ public static class JSONSerialization
 
         Matrix4x4 matrix4x4 = (Matrix4x4)_jsonObject.obj.ConvertTo(typeof(Matrix4x4));
         Vector4[] rows = new Vector4[4];
-        
+
         for (int i = 0; i < 4; i++)
         {
             rows[i] = matrix4x4.GetRow(i);
@@ -566,7 +589,7 @@ public static class JSONSerialization
                                 value += "[";
                                 for (int j = 0; j < childrenCount; j++)
                                 {
-                                    value += "\"" + component.transform.GetChild(j).ToString() + "\",";
+                                    value += "\"" + component.transform.GetChild(j).name + "\",";
                                 }
                                 RemoveLast(",", ref value);
                                 value += "],";
@@ -582,7 +605,7 @@ public static class JSONSerialization
                             value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
                         }
                         else
-                            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue ));
+                            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
                     }
                 }
                 RemoveLast(",", ref value);
@@ -601,9 +624,9 @@ public static class JSONSerialization
             RemoveLast(",", ref value);
 
             if (isChild)
-            value += "\n},\n";
+                value += "\n},\n";
             else
-            value += "\n}\n";
+                value += "\n}\n";
         }
         return value;
     }
