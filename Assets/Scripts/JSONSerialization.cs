@@ -183,6 +183,14 @@ public static class JSONSerialization
                         } while (!currLine.Contains("}"));
                         currLine = stream.ReadLine();
                     }
+                    else //Passe au prochain script ou termine le fichier texte
+                    {
+                        do
+                        {
+                            currLine = stream.ReadLine();
+                        }
+                        while (currLine != null && !currLine.Contains("Script")); //il peut être null quand le stream est terminé
+                    }
                 }
                 else if (currLine.Contains("}")) //EndOfObject
                 {
@@ -218,7 +226,7 @@ public static class JSONSerialization
 
     static void UpdateJSONObjects()
     {
-        foreach (MonoBehaviour key in jsonObjects.Keys)
+        foreach (MonoBehaviour key in jsonObjects.Keys.ToList()) //Pour créer une copie afin de pas supprimer un élément en itérant dessus
         {
             if (key == null)
             {
