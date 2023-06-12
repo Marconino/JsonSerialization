@@ -39,7 +39,6 @@ public class JSONObject
 public static class JSONSerialization
 {
     static Dictionary<MonoBehaviour, List<JSONObject>> jsonObjects = new Dictionary<MonoBehaviour, List<JSONObject>>();
-    //public static List<JSONObject> listObjects = new List<JSONObject>();
 
     public static void GetJSONObjects(MonoBehaviour _script)
     {
@@ -54,7 +53,8 @@ public static class JSONSerialization
 
                 if (jsonObjects.ContainsKey(_script))
                 {
-                    jsonObjects[_script].Add(jsonObject);
+                    if (!jsonObjects[_script].Contains(jsonObject))
+                        jsonObjects[_script].Add(jsonObject);
                 }
                 else
                 {
@@ -67,6 +67,8 @@ public static class JSONSerialization
 
     public static void Save(string _filename)
     {
+        UpdateJSONObjects();
+
         using (StreamWriter stream = new StreamWriter(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
         {
             string json = "{\n";
@@ -105,10 +107,14 @@ public static class JSONSerialization
 
     public static void Load(string _filename)
     {
+        UpdateJSONObjects();
+
         using (StreamReader stream = new StreamReader(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
         {
             string currLine = stream.ReadLine();
             currLine = stream.ReadLine(); //For first {
+
+            Dictionary<string, GameObject> gameObjectsInstancied = new Dictionary<string, GameObject>();
 
             while (!stream.EndOfStream)
             {
@@ -117,55 +123,66 @@ public static class JSONSerialization
                     string scriptName = currLine;
                     Filter(ref scriptName);
 
-                    MonoBehaviour script = jsonObjects.First(n => n.Key.name == scriptName).Key;
-                    Type scriptType = script.GetType();
+                    MonoBehaviour script = jsonObjects.FirstOrDefault(n => n.Key.name == scriptName).Key;
 
-                    do
+                    if (script != null)
                     {
-                        currLine = stream.ReadLine();
+                        Type scriptType = script.GetType();
 
-                        if (currLine.Contains(":"))
+                        do
                         {
-                            bool isGameObject = false;
-                            string[] parts = currLine.Split(':');
+                            currLine = stream.ReadLine();
 
-                            for (int i = 0; i < parts.Length; i++)
+                            if (currLine.Contains(":"))
                             {
-                                Filter(ref parts[i]);
-                            }
+                                string[] parts = currLine.Split(':');
 
-                            FieldInfo field = scriptType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                for (int i = 0; i < parts.Length; i++)
+                                {
+                                    Filter(ref parts[i]);
+                                }
 
-                            object value = null;
-                            if (field.FieldType.Name.Contains("Vector"))
-                            {
-                                value = VectorFromString(parts[1], field.FieldType);
-                            }
-                            else if (field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
-                            {
-                                value = ArrayFromString(parts[1], field.FieldType);
-                            }
-                            else if (field.FieldType.IsEnum)
-                            {
-                                value = Enum.Parse(field.FieldType, parts[1]);
-                            }
-                            else if (field.FieldType == typeof(GameObject))
-                            {
-                                isGameObject = true;
-                                GameObject go = (GameObject)field.GetValue(script).ConvertTo(typeof(GameObject));
-                                GameObjectFromString(ref currLine, stream, ref go);
-                            }
-                            else
-                            {
-                                value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
-                            }
+                                FieldInfo field = scriptType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-                            if (!isGameObject)
+                                object value = null;
+                                if (field.FieldType.Name.Contains("Vector"))
+                                {
+                                    value = VectorFromString(parts[1], field.FieldType);
+                                }
+                                else if (field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
+                                {
+                                    value = ArrayFromString(parts[1], field.FieldType);
+                                }
+                                else if (field.FieldType.IsEnum)
+                                {
+                                    value = Enum.Parse(field.FieldType, parts[1]);
+                                }
+                                else if (field.FieldType == typeof(GameObject))
+                                {
+                                    GameObject go = (GameObject)field.GetValue(script).ConvertTo(typeof(GameObject));
+
+                                    if (go == null)
+                                    {
+                                        if (!gameObjectsInstancied.TryGetValue(field.Name, out go))
+                                        {
+                                            go = new GameObject();
+                                            gameObjectsInstancied.Add(field.Name, go);
+                                        }
+                                    }
+                                    GameObjectFromString(ref currLine, stream, ref go);
+                                    value = go;
+                                }
+                                else
+                                {
+                                    value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
+                                }
+
                                 field.SetValue(script, value);
-                        }
+                            }
 
-                    } while (!currLine.Contains("}"));
-                    currLine = stream.ReadLine();
+                        } while (!currLine.Contains("}"));
+                        currLine = stream.ReadLine();
+                    }
                 }
                 else if (currLine.Contains("}")) //EndOfObject
                 {
@@ -197,6 +214,17 @@ public static class JSONSerialization
         }
 
 
+    }
+
+    static void UpdateJSONObjects()
+    {
+        foreach (MonoBehaviour key in jsonObjects.Keys)
+        {
+            if (key == null)
+            {
+                jsonObjects.Remove(key);
+            }
+        }
     }
 
     static object GameObjectFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
