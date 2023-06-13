@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,13 +6,11 @@ using System.Reflection;
 using Unity.VisualScripting;
 using UnityEngine;
 using System.Globalization;
-using System.Runtime.InteropServices.ComTypes;
-using UnityEngine.Tilemaps;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute { }
 
-public class JSONObject
+class JSONObject
 {
     public FieldInfo fieldInfo;
     public Type type;
@@ -64,7 +61,6 @@ public static class JSONSerialization
             }
         }
     }
-
     public static void Save(string _filename)
     {
         UpdateJSONObjects();
@@ -104,7 +100,6 @@ public static class JSONSerialization
             stream.Write(json);
         }
     }
-
     public static void Load(string _filename)
     {
         UpdateJSONObjects();
@@ -167,6 +162,8 @@ public static class JSONSerialization
                                         {
                                             go = new GameObject();
                                             gameObjectsInstancied.Add(field.Name, go);
+                                            int indexOldGO = jsonObjects[script].FindIndex(n => n.fieldInfo.Name == field.Name);
+                                            jsonObjects[script][indexOldGO].obj = go;
                                         }
                                     }
                                     GameObjectFromString(ref currLine, stream, ref go);
@@ -201,40 +198,270 @@ public static class JSONSerialization
         }
     }
 
-    static void Filter(ref string _string)
+    #region SaveMethods
+    static string Parse(JSONObject _jsonObject)
     {
-        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')' };
-
-        if (!_string.Contains("Script"))
+        string valueParsed = string.Empty;
+        if (_jsonObject.type.IsArray)
         {
-            foreach (char c in filters)
+            valueParsed += ParseArray(_jsonObject);
+            //Debug.Log(jsonObject.type.Name + " is a array.");
+        }
+        else if (_jsonObject.type.IsEnum)
+        {
+            valueParsed += ParseEnum(_jsonObject);
+            //Debug.Log(_jsonObject.type.Name + " is an enum.");
+        }
+        else if (_jsonObject.type.IsInterface)
+        {
+            //Debug.Log(_jsonObject.type.Name + " is an interface.");
+        }
+        else if (_jsonObject.type.IsPrimitive)
+        {
+            valueParsed += ParsePrimitive(_jsonObject);
+            //Debug.Log(_jsonObject.type.Name + " is a primitive type.");
+        }
+        else if (_jsonObject.type.IsValueType)
+        {
+            valueParsed += ParseValueType(_jsonObject);
+            //Debug.Log(_jsonObject.type.Name + " is a value type (struct).");
+        }
+        else if (_jsonObject.type.IsClass)
+        {
+            valueParsed += ParseClass(_jsonObject);
+            //Debug.Log(_jsonObject.type.Name + " is a class.");
+        }
+        return valueParsed;
+    }
+    static string ParseClass(JSONObject _jsonObject)
+    {
+        string value = string.Empty;
+
+        if (_jsonObject.fieldInfo != null)
+            value = "\"" + _jsonObject.fieldInfo.Name + "\" : ";
+        else if (_jsonObject.fieldName != string.Empty)
+            value = "\"" + _jsonObject.fieldName + "\" : ";
+
+        if (_jsonObject.type.Name.Contains("List"))
+        {
+            value += "[";
+            List<object> list = _jsonObject.obj.ConvertTo<List<object>>();
+
+            if (list != null)
             {
-                _string = _string.Replace(c.ToString(), string.Empty);
+                foreach (object item in list)
+                {
+                    Type type = item.GetType();
+
+                    JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
+                    value += Parse(itemJSONObject);
+                }
             }
 
-            if (_string[_string.Length - 1] == ',')
-                RemoveLast(",", ref _string);
+            RemoveLast(",", ref value);
+
+            if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
+                value += "]\n";
+            else
+                value += "],\n";
         }
+        else if (_jsonObject.type.Name == "String")
+        {
+            if (value == string.Empty) //c'est un element d'une liste
+                value = "\"" + _jsonObject.obj + "\", ";
+            else
+                value += "\"" + _jsonObject.obj + "\"\n";
+
+        }
+        else if (_jsonObject.type.Name.Contains("GameObject"))
+        {
+            value += "{";
+
+            GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
+            value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
+
+            Component[] components = gameObject.GetComponents<Component>();
+            bool isChild = _jsonObject.fieldName.Contains("Child");
+
+            value += "\"Components\" : " + components.Length + ",\n";
+            for (int i = 0; i < components.Length; i++)
+            {
+                Component component = components[i];
+                Type componentType = component.GetType();
+                value += "\"" + componentType + "\" : \n{\n";
+
+                if (componentType.BaseType == typeof(Component)) //Est un component d'Unity
+                {
+                    PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
+                    foreach (PropertyInfo property in properties)
+                    {
+                        if (!property.Name.Contains("root"))
+                        {
+                            object propertyValue = property.GetValue(component);
+
+                            if (propertyValue == null)
+                                value += "\"" + property.Name + "\" : null,\n";
+                            else if (property.Name.Contains("childCount"))
+                            {
+                                int childrenCount = (int)propertyValue.ConvertTo(typeof(int));
+                                value += "\"" + property.Name + "\"" + ": ";
+
+                                if (childrenCount > 0)
+                                {
+                                    value += "[";
+                                    for (int j = 0; j < childrenCount; j++)
+                                    {
+                                        value += "\"" + component.transform.GetChild(j).name + "\",";
+                                    }
+                                    RemoveLast(",", ref value);
+                                    value += "],";
+                                }
+                                else
+                                {
+                                    value += "0,";
+                                }
+                                value += "\n";
+                            }
+                            else if (property.Name.Contains("parent"))
+                            {
+                                value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
+                            }
+                            else
+                                value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+                        }
+                    }
+                }
+                else //Est un component personnalisé
+                {
+                    FieldInfo[] fields = componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+                    foreach (FieldInfo field in fields)
+                    {
+                        object propertyValue = field.GetValue(component);
+
+                        if (propertyValue == null)
+                            value += "\"" + field.Name + "\" : null,\n";
+                        else
+                            value += Parse(new JSONObject(field.Name, field.FieldType, propertyValue));
+                    }
+                }
+                RemoveLast(",", ref value);
+                value += "\n},\n";
+
+                if (i + 1 == components.Length) //Children
+                {
+                    int childrenCount = gameObject.transform.childCount;
+
+                    for (int j = 0; j < childrenCount; j++)
+                    {
+                        value += Parse(new JSONObject("Child " + j, typeof(GameObject), gameObject.transform.GetChild(j).gameObject));
+                    }
+                }
+            }
+            RemoveLast(",", ref value);
+
+            if (isChild)
+                value += "\n},\n";
+            else
+                value += "\n}\n";
+        }
+        return value;
+    }
+    static string ParseArray(JSONObject _jsonObject)
+    {
+        string value = string.Empty;
+
+        if (_jsonObject.fieldInfo == null)
+            value = "\"" + _jsonObject.fieldName + "\" : [";
         else
+            value = "\"" + _jsonObject.fieldInfo.Name + "\" : [";
+
+        Array array = (Array)_jsonObject.obj.ConvertTo(typeof(Array));
+
+        if (array != null)
         {
-            _string = _string.Substring(_string.IndexOf(':') + 2);
-            RemoveLast("\"", ref _string);
-        }
-
-
-    }
-
-    static void UpdateJSONObjects()
-    {
-        foreach (MonoBehaviour key in jsonObjects.Keys.ToList()) //Pour créer une copie afin de pas supprimer un élément en itérant dessus
-        {
-            if (key == null)
+            foreach (object item in array)
             {
-                jsonObjects.Remove(key);
+                Type type = item.GetType();
+
+                JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
+                value += Parse(itemJSONObject);
             }
         }
-    }
 
+        RemoveLast(",", ref value);
+        if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
+            value += "]\n";
+        else
+            value += "],\n";
+
+        return value;
+    }
+    static string ParseMatrix4x4(JSONObject _jsonObject)
+    {
+        string value = string.Empty;
+
+        Matrix4x4 matrix4x4 = (Matrix4x4)_jsonObject.obj.ConvertTo(typeof(Matrix4x4));
+        Vector4[] rows = new Vector4[4];
+
+        for (int i = 0; i < 4; i++)
+        {
+            rows[i] = matrix4x4.GetRow(i);
+            value += rows[i].ToString() + "|";
+        }
+        RemoveLast("|", ref value);
+        return value;
+    }
+    static string ParseEnum(JSONObject _jsonObject)
+    {
+        string value = _jsonObject.obj.ToString();
+
+        string returnStr = string.Empty;
+        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
+            returnStr = "\"" + value + "\", ";
+        else if (_jsonObject.fieldName != string.Empty)
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
+        else
+            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + value + "\"\n";
+
+        return returnStr;
+    }
+    static string ParseValueType(JSONObject _jsonObject)
+    {
+        string returnStr = string.Empty;
+
+        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
+            returnStr = "\"" + _jsonObject.obj + "\", ";
+        else if (_jsonObject.fieldName != string.Empty)
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + (_jsonObject.type == typeof(Matrix4x4) ? ParseMatrix4x4(_jsonObject) : _jsonObject.obj) + "\",\n";
+        else
+            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + _jsonObject.obj + "\"\n";
+
+        return returnStr;
+    }
+    static string ParsePrimitive(JSONObject _jsonObject)
+    {
+        string value = _jsonObject.obj.ToString().ToLower();
+
+        if (_jsonObject.type == typeof(float) || _jsonObject.type == typeof(double))
+        {
+            value = value.Replace(",", ".");
+        }
+
+        string returnStr = string.Empty;
+        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
+            returnStr = value + ", ";
+        else if (_jsonObject.fieldName != string.Empty)
+            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
+        else
+            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : " + value + "\n";
+
+        return returnStr;
+    }
+    #endregion
+    
+    #region LoadMethods
     static object GameObjectFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
     {
         int step = 0;
@@ -428,7 +655,6 @@ public static class JSONSerialization
 
         return _go;
     }
-
     static object Matrix4x4FromString(string _stringValue)
     {
         string[] parts = _stringValue.Split('|');
@@ -441,7 +667,17 @@ public static class JSONSerialization
 
         return matrix4X4;
     }
+    static object QuaternionFromString(string _stringValue)
+    {
+        string[] parts = _stringValue.Split(',');
+        float[] values = new float[parts.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out values[i]);
+        }
 
+        return new Quaternion(values[0], values[1], values[2], values[3]);
+    }
     static object ArrayFromString(string _stringValue, Type _arrayType)
     {
         List<object> array = new List<object>();
@@ -468,43 +704,6 @@ public static class JSONSerialization
 
         return array.ConvertTo(_arrayType);
     }
-
-    static List<object> StringToVectorFormat(string[] _stringValue, Type _vectorType)
-    {
-        int vecDimension = _vectorType == typeof(Vector2) ? 2 : _vectorType == typeof(Vector3) ? 3 : _vectorType == typeof(Vector4) ? 4 : 0;
-        string currentVector = string.Empty;
-        List<object> arrayVector = new List<object>();
-
-        for (int i = 0; i < _stringValue.Length + 1; i++)
-        {
-            if (i != 0 && i % vecDimension == 0)
-            {
-                RemoveLast(",", ref currentVector);
-                arrayVector.Add(VectorFromString(currentVector, _vectorType));
-
-                if (i < _stringValue.Length)
-                    currentVector = _stringValue[i] + ",";
-            }
-            else
-            {
-                currentVector += _stringValue[i] + ",";
-            }
-        }
-        return arrayVector;
-    }
-
-    static object QuaternionFromString(string _stringValue)
-    {
-        string[] parts = _stringValue.Split(',');
-        float[] values = new float[parts.Length];
-        for (int i = 0; i < values.Length; i++)
-        {
-            float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out values[i]);
-        }
-
-        return new Quaternion(values[0], values[1], values[2], values[3]);
-    }
-
     static object VectorFromString(string _stringValue, Type _vectorType)
     {
         string[] parts = _stringValue.Split(',');
@@ -538,272 +737,41 @@ public static class JSONSerialization
 
         return vector;
     }
+    #endregion
 
-    static string ParsePrimitive(JSONObject _jsonObject)
+    #region Utilities
+    static void UpdateJSONObjects()
     {
-        string value = _jsonObject.obj.ToString().ToLower();
-
-        if (_jsonObject.type == typeof(float) || _jsonObject.type == typeof(double))
+        foreach (MonoBehaviour key in jsonObjects.Keys.ToList()) //Pour créer une copie afin de pas supprimer un élément en itérant dessus
         {
-            value = value.Replace(",", ".");
-        }
-
-        string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
-            returnStr = value + ", ";
-        else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
-        else
-            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : " + value + "\n";
-
-        return returnStr;
-    }
-
-    static string ParseEnum(JSONObject _jsonObject)
-    {
-        string value = _jsonObject.obj.ToString();
-
-        string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
-            returnStr = "\"" + value + "\", ";
-        else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
-        else
-            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + value + "\"\n";
-
-        return returnStr;
-    }
-
-    static string ParseValueType(JSONObject _jsonObject)
-    {
-        string returnStr = string.Empty;
-
-        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
-            returnStr = "\"" + _jsonObject.obj + "\", ";
-        else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + (_jsonObject.type == typeof(Matrix4x4) ? ParseMatrix4x4(_jsonObject) : _jsonObject.obj) + "\",\n";
-        else
-            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + _jsonObject.obj + "\"\n";
-
-        return returnStr;
-    }
-
-    static string ParseMatrix4x4(JSONObject _jsonObject)
-    {
-        string value = string.Empty;
-
-        Matrix4x4 matrix4x4 = (Matrix4x4)_jsonObject.obj.ConvertTo(typeof(Matrix4x4));
-        Vector4[] rows = new Vector4[4];
-
-        for (int i = 0; i < 4; i++)
-        {
-            rows[i] = matrix4x4.GetRow(i);
-            value += rows[i].ToString() + "|";
-        }
-        RemoveLast("|", ref value);
-        return value;
-    }
-
-    static string ParseClass(JSONObject _jsonObject)
-    {
-        string value = string.Empty;
-
-        if (_jsonObject.fieldInfo != null)
-            value = "\"" + _jsonObject.fieldInfo.Name + "\" : ";
-        else if (_jsonObject.fieldName != string.Empty)
-            value = "\"" + _jsonObject.fieldName + "\" : ";
-
-        if (_jsonObject.type.Name.Contains("List"))
-        {
-            value += "[";
-            List<object> list = _jsonObject.obj.ConvertTo<List<object>>();
-
-            if (list != null)
+            if (key == null)
             {
-                foreach (object item in list)
-                {
-                    Type type = item.GetType();
-
-                    JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
-                    value += Parse(itemJSONObject);
-                }
-            }
-
-            RemoveLast(",", ref value);
-
-            if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
-                value += "]\n";
-            else
-                value += "],\n";
-        }
-        else if (_jsonObject.type.Name == "String")
-        {
-            if (value == string.Empty) //c'est un element d'une liste
-                value = "\"" + _jsonObject.obj + "\", ";
-            else
-                value += "\"" + _jsonObject.obj + "\"\n";
-
-        }
-        else if (_jsonObject.type.Name.Contains("GameObject"))
-        {
-            value += "{";
-
-            GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
-            value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
-
-            Component[] components = gameObject.GetComponents<Component>();
-            bool isChild = _jsonObject.fieldName.Contains("Child");
-
-            value += "\"Components\" : " + components.Length + ",\n";
-            for (int i = 0; i < components.Length; i++)
-            {
-                Component component = components[i];
-                Type componentType = component.GetType();
-                value += "\"" + componentType + "\" : \n{\n";
-
-                if (componentType.BaseType == typeof(Component)) //Est un component d'Unity
-                {
-                    PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-
-                    foreach (PropertyInfo property in properties)
-                    {
-                        if (!property.Name.Contains("root"))
-                        {
-                            object propertyValue = property.GetValue(component);
-
-                            if (propertyValue == null)
-                                value += "\"" + property.Name + "\" : null,\n";
-                            else if (property.Name.Contains("childCount"))
-                            {
-                                int childrenCount = (int)propertyValue.ConvertTo(typeof(int));
-                                value += "\"" + property.Name + "\"" + ": ";
-
-                                if (childrenCount > 0)
-                                {
-                                    value += "[";
-                                    for (int j = 0; j < childrenCount; j++)
-                                    {
-                                        value += "\"" + component.transform.GetChild(j).name + "\",";
-                                    }
-                                    RemoveLast(",", ref value);
-                                    value += "],";
-                                }
-                                else
-                                {
-                                    value += "0,";
-                                }
-                                value += "\n";
-                            }
-                            else if (property.Name.Contains("parent"))
-                            {
-                                value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
-                            }
-                            else
-                                value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
-                        }
-                    }
-                }
-                else //Est un component personnalisé
-                {
-                    FieldInfo[] fields = componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-                    foreach (FieldInfo field in fields)
-                    {
-                        object propertyValue = field.GetValue(component);
-
-                        if (propertyValue == null)
-                            value += "\"" + field.Name + "\" : null,\n";
-                        else
-                            value += Parse(new JSONObject(field.Name, field.FieldType, propertyValue));
-                    }
-                }
-                RemoveLast(",", ref value);
-                value += "\n},\n";
-
-                if (i + 1 == components.Length) //Children
-                {
-                    int childrenCount = gameObject.transform.childCount;
-
-                    for (int j = 0; j < childrenCount; j++)
-                    {
-                        value += Parse(new JSONObject("Child " + j, typeof(GameObject), gameObject.transform.GetChild(j).gameObject));
-                    }
-                }
-            }
-            RemoveLast(",", ref value);
-
-            if (isChild)
-                value += "\n},\n";
-            else
-                value += "\n}\n";
-        }
-        return value;
-    }
-
-    static string ParseArray(JSONObject _jsonObject)
-    {
-        string value = string.Empty;
-
-        if (_jsonObject.fieldInfo == null)
-            value = "\"" + _jsonObject.fieldName + "\" : [";
-        else
-            value = "\"" + _jsonObject.fieldInfo.Name + "\" : [";
-
-        Array array = (Array)_jsonObject.obj.ConvertTo(typeof(Array));
-
-        if (array != null)
-        {
-            foreach (object item in array)
-            {
-                Type type = item.GetType();
-
-                JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
-                value += Parse(itemJSONObject);
+                jsonObjects.Remove(key);
             }
         }
-
-        RemoveLast(",", ref value);
-        if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
-            value += "]\n";
-        else
-            value += "],\n";
-
-        return value;
     }
 
-    static string Parse(JSONObject _jsonObject)
+    static void Filter(ref string _string)
     {
-        string valueParsed = string.Empty;
-        if (_jsonObject.type.IsArray)
+        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')' };
+
+        if (!_string.Contains("Script"))
         {
-            valueParsed += ParseArray(_jsonObject);
-            //Debug.Log(jsonObject.type.Name + " is a array.");
+            foreach (char c in filters)
+            {
+                _string = _string.Replace(c.ToString(), string.Empty);
+            }
+
+            if (_string[_string.Length - 1] == ',')
+                RemoveLast(",", ref _string);
         }
-        else if (_jsonObject.type.IsEnum)
+        else
         {
-            valueParsed += ParseEnum(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is an enum.");
+            _string = _string.Substring(_string.IndexOf(':') + 2);
+            RemoveLast("\"", ref _string);
         }
-        else if (_jsonObject.type.IsInterface)
-        {
-            //Debug.Log(_jsonObject.type.Name + " is an interface.");
-        }
-        else if (_jsonObject.type.IsPrimitive)
-        {
-            valueParsed += ParsePrimitive(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is a primitive type.");
-        }
-        else if (_jsonObject.type.IsValueType)
-        {
-            valueParsed += ParseValueType(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is a value type (struct).");
-        }
-        else if (_jsonObject.type.IsClass)
-        {
-            valueParsed += ParseClass(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is a class.");
-        }
-        return valueParsed;
+
+
     }
 
     static void RemoveLast(string charRemoved, ref string _value)
@@ -811,4 +779,29 @@ public static class JSONSerialization
         int count = _value.LastIndexOf(charRemoved);
         _value = count > 0 ? _value.Remove(count, _value.Length - count) : _value;
     }
+
+    static List<object> StringToVectorFormat(string[] _stringValue, Type _vectorType)
+    {
+        int vecDimension = _vectorType == typeof(Vector2) ? 2 : _vectorType == typeof(Vector3) ? 3 : _vectorType == typeof(Vector4) ? 4 : 0;
+        string currentVector = string.Empty;
+        List<object> arrayVector = new List<object>();
+
+        for (int i = 0; i < _stringValue.Length + 1; i++)
+        {
+            if (i != 0 && i % vecDimension == 0)
+            {
+                RemoveLast(",", ref currentVector);
+                arrayVector.Add(VectorFromString(currentVector, _vectorType));
+
+                if (i < _stringValue.Length)
+                    currentVector = _stringValue[i] + ",";
+            }
+            else
+            {
+                currentVector += _stringValue[i] + ",";
+            }
+        }
+        return arrayVector;
+    }
+    #endregion
 }
