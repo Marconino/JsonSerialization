@@ -265,21 +265,29 @@ public static class JSONSerialization
 
         for (int i = 0; i < componentsCount; i++)
         {
+            bool isCustomComponent = false;
             string componentName = _currLine;
             Filter(ref componentName);
             componentName += ",UnityEngine"; //Pour le formattage
             Type componentType = Type.GetType(componentName);
 
-            Component currComponent = components.FirstOrDefault(n => n.GetType() == componentType) ?? _go.AddComponent(componentType);
+            if (componentType == null) //Est un component custom
+            {
+                isCustomComponent = true;
+                componentName = componentName.Remove(componentName.IndexOf(","));
+                componentType = Type.GetType(componentName);
+            }
 
-            PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            Component currComponent = components.FirstOrDefault(n => n.GetType() == componentType) ?? _go.AddComponent(componentType);
 
             _currLine = _stream.ReadLine();
             _currLine = _stream.ReadLine(); //Je mets le curseur sur la premi�re propri�t�
 
-            foreach (PropertyInfo property in properties)
+            if (isCustomComponent)
             {
-                if (!property.Name.Contains("root"))
+                FieldInfo[] fields = componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+                foreach (FieldInfo field in fields)
                 {
                     string[] parts = _currLine.Split(':');
 
@@ -288,51 +296,104 @@ public static class JSONSerialization
                         Filter(ref parts[j]);
                     }
 
-                    if (property.Name == parts[0] && property.CanWrite)
+                    if (field.Name == parts[0])
                     {
                         object value = null;
-                        if (property.PropertyType.Name.Contains("Vector"))
+                        if (field.FieldType.Name.Contains("Vector"))
                         {
-                            value = VectorFromString(parts[1], property.PropertyType);
+                            value = VectorFromString(parts[1], field.FieldType);
                         }
-                        else if (property.PropertyType.Name.Contains("Quaternion"))
+                        else if (field.FieldType.Name.Contains("Quaternion"))
                         {
                             value = QuaternionFromString(parts[1]);
                         }
-                        else if (property.PropertyType == typeof(Matrix4x4))
+                        else if (field.FieldType == typeof(Matrix4x4))
                         {
                             value = Matrix4x4FromString(parts[1]);
                         }
-                        else if (property.PropertyType.Name.Contains("List") || property.PropertyType.IsArray)
+                        else if (field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
                         {
-                            value = ArrayFromString(parts[1], property.PropertyType);
+                            value = ArrayFromString(parts[1], field.FieldType);
                         }
-                        else if (property.PropertyType.IsEnum)
+                        else if (field.FieldType.IsEnum)
                         {
-                            value = Enum.Parse(property.PropertyType, parts[1]);
+                            value = Enum.Parse(field.FieldType, parts[1]);
                         }
 
-                        else if (property.PropertyType == typeof(Transform))
+                        else if (field.FieldType == typeof(Transform))
                         {
                             value = parts[1].Equals("null") ? null : _go.transform.parent;
                         }
                         else
                         {
-                            value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
+                            value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
                         }
 
-                        if (property.Name.Contains("hierarchyCapacity"))
-                            property.SetValue(currComponent, _go.transform.hierarchyCapacity);
-                        else
-                            property.SetValue(currComponent, value);
-                    }
-                    else if (property.Name.Contains("childCount"))
-                    {
-                        children = (string[])ArrayFromString(parts[1], typeof(string[]));
-                        if (children[0].Contains("0"))
-                            children = new string[0];
+                        field.SetValue(currComponent, value);
                     }
                     _currLine = _stream.ReadLine();
+                }
+            }
+            else
+            {
+                PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                foreach (PropertyInfo property in properties)
+                {
+                    if (!property.Name.Contains("root"))
+                    {
+                        string[] parts = _currLine.Split(':');
+
+                        for (int j = 0; j < parts.Length; j++)
+                        {
+                            Filter(ref parts[j]);
+                        }
+
+                        if (property.Name == parts[0] && property.CanWrite)
+                        {
+                            object value = null;
+                            if (property.PropertyType.Name.Contains("Vector"))
+                            {
+                                value = VectorFromString(parts[1], property.PropertyType);
+                            }
+                            else if (property.PropertyType.Name.Contains("Quaternion"))
+                            {
+                                value = QuaternionFromString(parts[1]);
+                            }
+                            else if (property.PropertyType == typeof(Matrix4x4))
+                            {
+                                value = Matrix4x4FromString(parts[1]);
+                            }
+                            else if (property.PropertyType.Name.Contains("List") || property.PropertyType.IsArray)
+                            {
+                                value = ArrayFromString(parts[1], property.PropertyType);
+                            }
+                            else if (property.PropertyType.IsEnum)
+                            {
+                                value = Enum.Parse(property.PropertyType, parts[1]);
+                            }
+
+                            else if (property.PropertyType == typeof(Transform))
+                            {
+                                value = parts[1].Equals("null") ? null : _go.transform.parent;
+                            }
+                            else
+                            {
+                                value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
+                            }
+
+                            if (property.Name.Contains("hierarchyCapacity"))
+                                property.SetValue(currComponent, _go.transform.hierarchyCapacity);
+                            else
+                                property.SetValue(currComponent, value);
+                        }
+                        else if (property.Name.Contains("childCount"))
+                        {
+                            children = (string[])ArrayFromString(parts[1], typeof(string[]));
+                            if (children[0].Contains("0"))
+                                children = new string[0];
+                        }
+                        _currLine = _stream.ReadLine();
+                    }
                 }
             }
             _currLine = _stream.ReadLine();
@@ -549,7 +610,7 @@ public static class JSONSerialization
 
         if (_jsonObject.fieldInfo != null)
             value = "\"" + _jsonObject.fieldInfo.Name + "\" : ";
-        else
+        else if (_jsonObject.fieldName != string.Empty)
             value = "\"" + _jsonObject.fieldName + "\" : ";
 
         if (_jsonObject.type.Name.Contains("List"))
@@ -565,31 +626,26 @@ public static class JSONSerialization
 
                     JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
                     value += Parse(itemJSONObject);
-
                 }
             }
 
             RemoveLast(",", ref value);
-            value += "]\n";
+
+            if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
+                value += "]\n";
+            else
+                value += "],\n";
         }
         else if (_jsonObject.type.Name == "String")
         {
-            value += "\"" + _jsonObject.obj + "\"\n";
+            if (value == string.Empty) //c'est un element d'une liste
+                value = "\"" + _jsonObject.obj + "\", ";
+            else
+                value += "\"" + _jsonObject.obj + "\"\n";
+
         }
         else if (_jsonObject.type.Name.Contains("GameObject"))
         {
-
-            /*
-            TODO Save GameObject :
-
-            -Components
-            -Tag
-            -Layer
-            -Name
-            -IsActive
-            -Children
-
-            */
             value += "{";
 
             GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
@@ -603,45 +659,62 @@ public static class JSONSerialization
             {
                 Component component = components[i];
                 Type componentType = component.GetType();
-                PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-
                 value += "\"" + componentType + "\" : \n{\n";
 
-                foreach (PropertyInfo property in properties)
+                if (componentType.BaseType == typeof(Component)) //Est un component d'Unity
                 {
-                    if (!property.Name.Contains("root"))
+                    PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+
+                    foreach (PropertyInfo property in properties)
                     {
-                        object propertyValue = property.GetValue(component);
-
-                        if (propertyValue == null)
-                            value += "\"" + property.Name + "\" : null,\n";
-                        else if (property.Name.Contains("childCount"))
+                        if (!property.Name.Contains("root"))
                         {
-                            int childrenCount = (int)propertyValue.ConvertTo(typeof(int));
-                            value += "\"" + property.Name + "\"" + ": ";
+                            object propertyValue = property.GetValue(component);
 
-                            if (childrenCount > 0)
+                            if (propertyValue == null)
+                                value += "\"" + property.Name + "\" : null,\n";
+                            else if (property.Name.Contains("childCount"))
                             {
-                                value += "[";
-                                for (int j = 0; j < childrenCount; j++)
+                                int childrenCount = (int)propertyValue.ConvertTo(typeof(int));
+                                value += "\"" + property.Name + "\"" + ": ";
+
+                                if (childrenCount > 0)
                                 {
-                                    value += "\"" + component.transform.GetChild(j).name + "\",";
+                                    value += "[";
+                                    for (int j = 0; j < childrenCount; j++)
+                                    {
+                                        value += "\"" + component.transform.GetChild(j).name + "\",";
+                                    }
+                                    RemoveLast(",", ref value);
+                                    value += "],";
                                 }
-                                RemoveLast(",", ref value);
-                                value += "],";
+                                else
+                                {
+                                    value += "0,";
+                                }
+                                value += "\n";
+                            }
+                            else if (property.Name.Contains("parent"))
+                            {
+                                value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
                             }
                             else
-                            {
-                                value += "0,";
-                            }
-                            value += "\n";
+                                value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
                         }
-                        else if (property.Name.Contains("parent"))
-                        {
-                            value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
-                        }
+                    }
+                }
+                else //Est un component personnalisé
+                {
+                    FieldInfo[] fields = componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+                    foreach (FieldInfo field in fields)
+                    {
+                        object propertyValue = field.GetValue(component);
+
+                        if (propertyValue == null)
+                            value += "\"" + field.Name + "\" : null,\n";
                         else
-                            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+                            value += Parse(new JSONObject(field.Name, field.FieldType, propertyValue));
                     }
                 }
                 RemoveLast(",", ref value);
@@ -672,7 +745,7 @@ public static class JSONSerialization
         string value = string.Empty;
 
         if (_jsonObject.fieldInfo == null)
-            value = " [";
+            value = "\"" + _jsonObject.fieldName + "\" : [";
         else
             value = "\"" + _jsonObject.fieldInfo.Name + "\" : [";
 
@@ -690,7 +763,11 @@ public static class JSONSerialization
         }
 
         RemoveLast(",", ref value);
-        value += "]\n";
+        if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
+            value += "]\n";
+        else
+            value += "],\n";
+
         return value;
     }
 
