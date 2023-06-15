@@ -290,7 +290,7 @@ public static class JSONSerialization
                 Type componentType = component.GetType();
                 value += "\"" + componentType + "\" : \n{\n";
 
-                if (componentType.BaseType == typeof(Component)) //Est un component d'Unity
+                if (componentType.BaseType == typeof(Component) || componentType.Name.Contains("Mesh")) //Est un component d'Unity
                 {
                     PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
@@ -365,6 +365,23 @@ public static class JSONSerialization
                 value += "\n},\n";
             else
                 value += "\n}\n";
+        }
+        else if (_jsonObject.type.Name.Contains("Mesh"))
+        {
+            value += "\n{\n";
+            Mesh mesh = (Mesh)_jsonObject.obj.ConvertTo(typeof(Mesh));
+            PropertyInfo[] properties = _jsonObject.type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            foreach (PropertyInfo property in properties)
+            {
+                object propertyValue = property.GetValue(mesh);
+
+                if (propertyValue == null)
+                    value += "\"" + property.Name + "\" : null,\n";
+                else
+                    value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+            }
+            RemoveLast(",", ref value);
+            value += "\n},\n";
         }
         return value;
     }
@@ -460,7 +477,7 @@ public static class JSONSerialization
         return returnStr;
     }
     #endregion
-    
+
     #region LoadMethods
     static object GameObjectFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
     {
@@ -525,36 +542,7 @@ public static class JSONSerialization
 
                     if (field.Name == parts[0])
                     {
-                        object value = null;
-                        if (field.FieldType.Name.Contains("Vector"))
-                        {
-                            value = VectorFromString(parts[1], field.FieldType);
-                        }
-                        else if (field.FieldType.Name.Contains("Quaternion"))
-                        {
-                            value = QuaternionFromString(parts[1]);
-                        }
-                        else if (field.FieldType == typeof(Matrix4x4))
-                        {
-                            value = Matrix4x4FromString(parts[1]);
-                        }
-                        else if (field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
-                        {
-                            value = ArrayFromString(parts[1], field.FieldType);
-                        }
-                        else if (field.FieldType.IsEnum)
-                        {
-                            value = Enum.Parse(field.FieldType, parts[1]);
-                        }
-
-                        else if (field.FieldType == typeof(Transform))
-                        {
-                            value = parts[1].Equals("null") ? null : _go.transform.parent;
-                        }
-                        else
-                        {
-                            value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
-                        }
+                        object value = GetObjectFromString(field.FieldType, parts[1], ref _currLine, ref _go, _stream);
 
                         field.SetValue(currComponent, value);
                     }
@@ -577,36 +565,7 @@ public static class JSONSerialization
 
                         if (property.Name == parts[0] && property.CanWrite)
                         {
-                            object value = null;
-                            if (property.PropertyType.Name.Contains("Vector"))
-                            {
-                                value = VectorFromString(parts[1], property.PropertyType);
-                            }
-                            else if (property.PropertyType.Name.Contains("Quaternion"))
-                            {
-                                value = QuaternionFromString(parts[1]);
-                            }
-                            else if (property.PropertyType == typeof(Matrix4x4))
-                            {
-                                value = Matrix4x4FromString(parts[1]);
-                            }
-                            else if (property.PropertyType.Name.Contains("List") || property.PropertyType.IsArray)
-                            {
-                                value = ArrayFromString(parts[1], property.PropertyType);
-                            }
-                            else if (property.PropertyType.IsEnum)
-                            {
-                                value = Enum.Parse(property.PropertyType, parts[1]);
-                            }
-
-                            else if (property.PropertyType == typeof(Transform))
-                            {
-                                value = parts[1].Equals("null") ? null : _go.transform.parent;
-                            }
-                            else
-                            {
-                                value = Convert.ChangeType(parts[1], property.PropertyType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
-                            }
+                            object value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
 
                             if (property.Name.Contains("hierarchyCapacity"))
                                 property.SetValue(currComponent, _go.transform.hierarchyCapacity);
@@ -654,6 +613,50 @@ public static class JSONSerialization
         }
 
         return _go;
+    }
+    static object MeshFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
+    {
+        Mesh mesh = null;
+
+        if (!_currLine.Contains("null"))
+        {
+            _currLine = _stream.ReadLine();
+            _currLine = _stream.ReadLine(); //Je mets le curseur sur la premiere propriete
+
+            mesh = new Mesh();
+            PropertyInfo[] properties = mesh.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            foreach (PropertyInfo property in properties)
+            {
+                string[] parts = _currLine.Split(':');
+
+                for (int j = 0; j < parts.Length; j++)
+                {
+                    Filter(ref parts[j]);
+                }
+
+                if (property.Name == parts[0] && property.CanWrite)
+                {
+                    object value = null;
+
+                    if (_currLine.Contains("bounds"))
+                    {
+                        Bounds bounds = new Bounds();
+                        RemoveLast(",", ref parts[2]);
+                        bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
+                        bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
+                    }
+                    else if (!parts[1].Contains("null"))
+                    {
+                        value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
+                    }
+
+                    property.SetValue(mesh, value);
+                }
+                _currLine = _stream.ReadLine();
+            }
+        }
+
+        return mesh.ConvertTo(typeof(object));
     }
     static object Matrix4x4FromString(string _stringValue)
     {
@@ -762,7 +765,7 @@ public static class JSONSerialization
                 _string = _string.Replace(c.ToString(), string.Empty);
             }
 
-            if (_string[_string.Length - 1] == ',')
+            if (_string != string.Empty && _string[_string.Length - 1] == ',')
                 RemoveLast(",", ref _string);
         }
         else
@@ -802,6 +805,45 @@ public static class JSONSerialization
             }
         }
         return arrayVector;
+    }
+
+    static object GetObjectFromString(Type _objectType, string _strValue, ref string _currLine, ref GameObject _go, StreamReader _stream)
+    {
+        object value = null;
+
+        if (_objectType.Name.Contains("Quaternion"))
+        {
+            value = QuaternionFromString(_strValue);
+        }
+        else if (_objectType == typeof(Matrix4x4))
+        {
+            value = Matrix4x4FromString(_strValue);
+        }
+        else if (_objectType.Name.Contains("List") || _objectType.IsArray)
+        {
+            value = ArrayFromString(_strValue, _objectType);
+        }
+        else if (_objectType.Name.Contains("Vector"))
+        {
+            value = VectorFromString(_strValue, _objectType);
+        }
+        else if (_objectType.IsEnum)
+        {
+            value = Enum.Parse(_objectType, _strValue);
+        }
+        else if (_objectType == typeof(Transform))
+        {
+            value = _strValue.Equals("null") ? null : _go.transform.parent;
+        }
+        else if (_objectType == typeof(Mesh))
+        {
+            value = MeshFromString(ref _currLine, _stream, ref _go);
+        }
+        else
+        {
+            value = Convert.ChangeType(_strValue, _objectType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
+        }
+        return value;
     }
     #endregion
 }
