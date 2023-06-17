@@ -1,8 +1,5 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
-using UnityEditor;
 using UnityEngine;
 
 public enum TestSave
@@ -13,7 +10,7 @@ public enum TestSave
 
 public class Test : MonoBehaviour
 {
-    string testString = "salutlespotes";
+    [JSONRead] string testString = "salutlespotes";
     float floatTest = 50.4f;
     int intTest2 = 4;
     double doubleTest3 = 47.874847980;
@@ -23,8 +20,8 @@ public class Test : MonoBehaviour
     Vector2Int test7 = new Vector2Int(90, 100);
     Vector3Int test8 = new Vector3Int(40, 96, 78);
     Vector3 test9 = new Vector3(14589.4f, 12.0f, 79.7f);
-    [SerializeField]Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
-     List<int> testListInt = new List<int>() { 50, 100, 200 };
+    [SerializeField][JSONRead]Vector4 test10 = new Vector4(14589.4f, 12.0f, 79.7f, 97889.56f);
+    [JSONRead] List<int> testListInt = new List<int>() { 50, 100, 200 };
     [JSONRead][SerializeField] int[] testArrayInt = new int[] { 5, 10, 20 };
      List<float> test11 = new List<float>();
      List<int> test12 = new List<int>();
@@ -36,7 +33,7 @@ public class Test : MonoBehaviour
      List<Vector3Int> test18 = new List<Vector3Int>();
      List<Vector3> test19 = new List<Vector3>();
      List<Vector4> test20 = new List<Vector4>();
-    [SerializeField]  GameObject test21;
+    [JSONRead][SerializeField]  GameObject test21;
      List<GameObject> test22;
      TestSave[] test23 = new TestSave[] { TestSave.NON, TestSave.OUI, TestSave.NON };
     //[JSONRead] TestSave[] test24;
@@ -44,6 +41,8 @@ public class Test : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        Matrix4x4 test = new Matrix4x4();
+        Type type = test.GetType();
         test11.Add(0.4f);
         test11.Add(484.7f);
         test11.Add(4.798f);
@@ -76,7 +75,6 @@ public class Test : MonoBehaviour
         //test24[2] = TestSave.OUI;
         
         JSONSerialization.GetJSONObjects(this);
-
         //CustomJSON.Save("TestSave");
         //CustomJSON.Load("TestSave");
     }

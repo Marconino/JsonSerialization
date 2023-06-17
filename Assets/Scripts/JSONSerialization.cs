@@ -6,6 +6,7 @@ using System.Reflection;
 using Unity.VisualScripting;
 using UnityEngine;
 using System.Globalization;
+using UnityEngine.Windows;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute { }
@@ -293,7 +294,7 @@ public static class JSONSerialization
                 if (componentType.BaseType == typeof(Component) || componentType.Name.Contains("Mesh")) //Est un component d'Unity
                 {
                     PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-
+                   
                     foreach (PropertyInfo property in properties)
                     {
                         if (!property.Name.Contains("root"))
@@ -330,6 +331,15 @@ public static class JSONSerialization
                             else
                                 value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
                         }
+                    }
+
+                    if (componentType == typeof(MeshRenderer))
+                    {
+                        MeshRenderer renderer = (MeshRenderer)component;
+                        string[] materialsName = renderer.materials.Select(n => n != null ? n.name.Replace("(Instance)", string.Empty) : null).ToArray();
+                        string[] sharedMaterialsName = renderer.materials.Select(n => n != null ? n.name.Replace("(Instance)", string.Empty) : null).ToArray();
+                        value += ParseArray(new JSONObject("materials", typeof(string[]), materialsName));          
+                        value += ParseArray(new JSONObject("sharedMaterials", typeof(string[]), sharedMaterialsName));          
                     }
                 }
                 else //Est un component personnalisé
@@ -582,6 +592,35 @@ public static class JSONSerialization
                     }
                 }
             }
+            if (componentType == typeof(MeshRenderer)) //Get materials and sharedMaterials
+            {
+                MeshRenderer meshRenderer = currComponent as MeshRenderer;
+
+                for (int j = 0; j < 2; j++)
+                {
+                    string[] parts = _currLine.Split(':');
+
+                    for (int k = 0; k < parts.Length; k++)
+                    {
+                        Filter(ref parts[k]);
+                    }
+
+                    string[] materialsName = (string[])ArrayFromString(parts[1], typeof(string[]));
+                    Material[] materials = new Material[materialsName.Length];
+                    for (int k = 0; k < materials.Length; k++)
+                    {
+                        materials[k] = materialsName[k].Contains("Default-MaterialInstance") ? new Material(Shader.Find("Standard")) : Resources.Load<Material>("Materials/" + materialsName[k]);
+                    }
+
+                    if (j == 0)
+                        meshRenderer.materials = materials;
+                    else
+                        meshRenderer.sharedMaterials = materials;
+
+                    _currLine = _stream.ReadLine();
+                }
+
+            }
             _currLine = _stream.ReadLine();
         }
 
@@ -622,7 +661,7 @@ public static class JSONSerialization
         {
             _currLine = _stream.ReadLine();
             _currLine = _stream.ReadLine(); //Je mets le curseur sur la premiere propriete
-
+            
             mesh = new Mesh();
             PropertyInfo[] properties = mesh.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
             foreach (PropertyInfo property in properties)
