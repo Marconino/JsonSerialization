@@ -294,7 +294,7 @@ public static class JSONSerialization
                 if (componentType.BaseType == typeof(Component) || componentType.Name.Contains("Mesh")) //Est un component d'Unity
                 {
                     PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-                   
+
                     foreach (PropertyInfo property in properties)
                     {
                         if (!property.Name.Contains("root"))
@@ -336,10 +336,10 @@ public static class JSONSerialization
                     if (componentType == typeof(MeshRenderer))
                     {
                         MeshRenderer renderer = (MeshRenderer)component;
-                        string[] materialsName = renderer.materials.Select(n => n != null ? n.name.Replace("(Instance)", string.Empty) : null).ToArray();
-                        string[] sharedMaterialsName = renderer.materials.Select(n => n != null ? n.name.Replace("(Instance)", string.Empty) : null).ToArray();
-                        value += ParseArray(new JSONObject("materials", typeof(string[]), materialsName));          
-                        value += ParseArray(new JSONObject("sharedMaterials", typeof(string[]), sharedMaterialsName));          
+                        string[] materialsName = renderer.materials.Select(n => n != null ? n.name.Replace(" (Instance)", string.Empty) : null).ToArray();
+                        string[] sharedMaterialsName = renderer.materials.Select(n => n != null ? n.name.Replace(" (Instance)", string.Empty) : null).ToArray();
+                        value += ParseArray(new JSONObject("materials", typeof(string[]), materialsName));
+                        value += ParseArray(new JSONObject("sharedMaterials", typeof(string[]), sharedMaterialsName));
                     }
                 }
                 else //Est un component personnalisé
@@ -498,7 +498,14 @@ public static class JSONSerialization
         {
             _currLine = _stream.ReadLine();
             string value = _currLine.Remove(0, _currLine.IndexOf(':'));
+            if (step > 1) //Pour ne pas changer le nom ni le tag enregistré
             Filter(ref value);
+            else
+            {
+                value = value.Remove(0, value.IndexOf('\"') + 1);
+                int lastIndex = value.LastIndexOf('\"');
+                value = value.Remove(lastIndex, value.Length - lastIndex);
+            }
 
             switch (step)
             {
@@ -567,26 +574,30 @@ public static class JSONSerialization
                     if (!property.Name.Contains("root"))
                     {
                         string[] parts = _currLine.Split(':');
+                        Filter(ref parts[0]);
 
-                        for (int j = 0; j < parts.Length; j++)
+                        if (property.Name.Contains("childCount"))
                         {
-                            Filter(ref parts[j]);
+                            for (int k = 0; k < parts[1].Length; k++)
+                            {
+                                parts[1] = parts[1].Replace("\"", string.Empty);
+                            }
+                            parts[1] = parts[1].Trim(' ', ',');
+
+                            children = (string[])ArrayFromString(parts[1], typeof(string[]));
+                            if (children[0].Contains("0"))
+                                children = new string[0];
                         }
-
-                        if (property.Name == parts[0] && property.CanWrite)
+                        else if (property.Name == parts[0] && property.CanWrite)
                         {
+                            Filter(ref parts[1]);
+
                             object value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
 
                             if (property.Name.Contains("hierarchyCapacity"))
                                 property.SetValue(currComponent, _go.transform.hierarchyCapacity);
                             else
                                 property.SetValue(currComponent, value);
-                        }
-                        else if (property.Name.Contains("childCount"))
-                        {
-                            children = (string[])ArrayFromString(parts[1], typeof(string[]));
-                            if (children[0].Contains("0"))
-                                children = new string[0];
                         }
                         _currLine = _stream.ReadLine();
                     }
@@ -600,10 +611,11 @@ public static class JSONSerialization
                 {
                     string[] parts = _currLine.Split(':');
 
-                    for (int k = 0; k < parts.Length; k++)
+                    for (int k = 0; k < parts[1].Length; k++)
                     {
-                        Filter(ref parts[k]);
+                        parts[1] = parts[1].Replace("\"", string.Empty);
                     }
+                    parts[1] = parts[1].Trim(' ', ',');
 
                     string[] materialsName = (string[])ArrayFromString(parts[1], typeof(string[]));
                     Material[] materials = new Material[materialsName.Length];
@@ -661,7 +673,7 @@ public static class JSONSerialization
         {
             _currLine = _stream.ReadLine();
             _currLine = _stream.ReadLine(); //Je mets le curseur sur la premiere propriete
-            
+
             mesh = new Mesh();
             PropertyInfo[] properties = mesh.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
             foreach (PropertyInfo property in properties)
@@ -812,8 +824,6 @@ public static class JSONSerialization
             _string = _string.Substring(_string.IndexOf(':') + 2);
             RemoveLast("\"", ref _string);
         }
-
-
     }
 
     static void RemoveLast(string charRemoved, ref string _value)
