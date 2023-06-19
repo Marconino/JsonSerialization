@@ -124,6 +124,7 @@ public static class JSONSerialization
                     if (script != null)
                     {
                         Type scriptType = script.GetType();
+                        bool isGameObject = false;
 
                         do
                         {
@@ -155,6 +156,7 @@ public static class JSONSerialization
                                 }
                                 else if (field.FieldType == typeof(GameObject))
                                 {
+                                    isGameObject = true;
                                     GameObject go = (GameObject)field.GetValue(script).ConvertTo(typeof(GameObject));
 
                                     if (go == null)
@@ -178,7 +180,7 @@ public static class JSONSerialization
                                 field.SetValue(script, value);
                             }
 
-                        } while (!currLine.Contains("}"));
+                        } while (!currLine.Contains("}") || isGameObject);
                         currLine = stream.ReadLine();
                     }
                     else //Passe au prochain script ou termine le fichier texte
@@ -276,7 +278,7 @@ public static class JSONSerialization
         }
         else if (_jsonObject.type.Name.Contains("GameObject"))
         {
-            value += "{";
+            value += "\n{";
 
             GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
             value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
@@ -291,13 +293,13 @@ public static class JSONSerialization
                 Type componentType = component.GetType();
                 value += "\"" + componentType + "\" : \n{\n";
 
-                if (componentType.BaseType == typeof(Component) || componentType.Name.Contains("Mesh")) //Est un component d'Unity
+                if (componentType.BaseType == typeof(Component) || componentType.Name.Contains("Mesh") || componentType.ToString().Contains("UnityEngine")) //Est un component d'Unity
                 {
                     PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
 
                     foreach (PropertyInfo property in properties)
                     {
-                        if (!property.Name.Contains("root"))
+                        if (!property.Name.Contains("root") && property.CanWrite || property.Name.Contains("childCount"))
                         {
                             object propertyValue = property.GetValue(component);
 
@@ -383,12 +385,15 @@ public static class JSONSerialization
             PropertyInfo[] properties = _jsonObject.type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
             foreach (PropertyInfo property in properties)
             {
-                object propertyValue = property.GetValue(mesh);
+                if (property.CanWrite)
+                {
+                    object propertyValue = property.GetValue(mesh);
 
-                if (propertyValue == null)
-                    value += "\"" + property.Name + "\" : null,\n";
-                else
-                    value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+                    if (propertyValue == null)
+                        value += "\"" + property.Name + "\" : null,\n";
+                    else
+                        value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+                }
             }
             RemoveLast(",", ref value);
             value += "\n},\n";
@@ -493,13 +498,14 @@ public static class JSONSerialization
     {
         int step = 0;
         int componentsCount = 0;
+        _currLine = _stream.ReadLine();
 
         do
         {
             _currLine = _stream.ReadLine();
             string value = _currLine.Remove(0, _currLine.IndexOf(':'));
             if (step > 1) //Pour ne pas changer le nom ni le tag enregistré
-            Filter(ref value);
+                Filter(ref value);
             else
             {
                 value = value.Remove(0, value.IndexOf('\"') + 1);
@@ -571,7 +577,7 @@ public static class JSONSerialization
                 PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
                 foreach (PropertyInfo property in properties)
                 {
-                    if (!property.Name.Contains("root"))
+                    if (property.CanWrite || property.Name.Contains("childCount"))
                     {
                         string[] parts = _currLine.Split(':');
                         Filter(ref parts[0]);
@@ -588,7 +594,7 @@ public static class JSONSerialization
                             if (children[0].Contains("0"))
                                 children = new string[0];
                         }
-                        else if (property.Name == parts[0] && property.CanWrite)
+                        else if (property.Name == parts[0])
                         {
                             Filter(ref parts[1]);
 
@@ -660,6 +666,8 @@ public static class JSONSerialization
 
             child.transform.SetSiblingIndex(j); //Je mets l'enfant au bon index de la hierarchie
             GameObjectFromString(ref _currLine, _stream, ref child);
+
+            //if (j + 1 < children.Length) //Si ce n'est pas le dernier enfant
             _currLine = _stream.ReadLine();
         }
 
@@ -680,30 +688,33 @@ public static class JSONSerialization
             {
                 string[] parts = _currLine.Split(':');
 
-                for (int j = 0; j < parts.Length; j++)
+                if (property.CanWrite)
                 {
-                    Filter(ref parts[j]);
-                }
-
-                if (property.Name == parts[0] && property.CanWrite)
-                {
-                    object value = null;
-
-                    if (_currLine.Contains("bounds"))
+                    for (int j = 0; j < parts.Length; j++)
                     {
-                        Bounds bounds = new Bounds();
-                        RemoveLast(",", ref parts[2]);
-                        bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
-                        bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
-                    }
-                    else if (!parts[1].Contains("null"))
-                    {
-                        value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
+                        Filter(ref parts[j]);
                     }
 
-                    property.SetValue(mesh, value);
+                    if (property.Name == parts[0])
+                    {
+                        object value = null;
+
+                        if (_currLine.Contains("bounds"))
+                        {
+                            Bounds bounds = new Bounds();
+                            RemoveLast(",", ref parts[2]);
+                            bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
+                            bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
+                        }
+                        else if (!parts[1].Contains("null"))
+                        {
+                            value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
+                        }
+
+                        property.SetValue(mesh, value);
+                    }
+                    _currLine = _stream.ReadLine();
                 }
-                _currLine = _stream.ReadLine();
             }
         }
 
@@ -790,6 +801,20 @@ public static class JSONSerialization
         }
 
         return vector;
+    }
+    static object ColorFromString(string _stringValue)
+    {
+        string colorStr = _stringValue.Remove(0, 4).Trim('(', ')'); //formattage en Vector4
+        Vector4 colorValues = (Vector4)VectorFromString(colorStr, typeof(Vector4));
+
+        return new Color(colorValues.x, colorValues.y, colorValues.z, colorValues.w);
+    }
+    static object RectFromString(string _stringValue)
+    {
+        string rectString = _stringValue.Remove(0,_stringValue.IndexOf('(')).Trim('(', ')','\"', ',').
+            Replace("x:", string.Empty).Replace("y:", string.Empty).Replace("width:", string.Empty).Replace("height:", string.Empty);
+        Vector4 rectValues = (Vector4)VectorFromString(rectString, typeof(Vector4));
+        return new Rect(rectValues.x, rectValues.y, rectValues.z, rectValues.w);
     }
     #endregion
 
@@ -887,6 +912,14 @@ public static class JSONSerialization
         else if (_objectType == typeof(Mesh))
         {
             value = MeshFromString(ref _currLine, _stream, ref _go);
+        }
+        else if (_objectType == typeof(Color))
+        {
+            value = ColorFromString(_strValue);
+        }
+        else if (_objectType == typeof(Rect))
+        {
+            value = RectFromString(_currLine);
         }
         else
         {
