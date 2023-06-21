@@ -7,6 +7,7 @@ using Unity.VisualScripting;
 using UnityEngine;
 using System.Globalization;
 using UnityEngine.Windows;
+using System.Runtime.InteropServices.ComTypes;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute { }
@@ -111,6 +112,7 @@ public static class JSONSerialization
             currLine = stream.ReadLine(); //For first {
 
             Dictionary<string, GameObject> gameObjectsInstancied = new Dictionary<string, GameObject>();
+            int objectsOpened = 0;
 
             while (!stream.EndOfStream)
             {
@@ -124,7 +126,7 @@ public static class JSONSerialization
                     if (script != null)
                     {
                         Type scriptType = script.GetType();
-                        bool isGameObject = false;
+                        objectsOpened++;
 
                         do
                         {
@@ -156,7 +158,8 @@ public static class JSONSerialization
                                 }
                                 else if (field.FieldType == typeof(GameObject))
                                 {
-                                    isGameObject = true;
+                                    objectsOpened++;
+
                                     GameObject go = (GameObject)field.GetValue(script).ConvertTo(typeof(GameObject));
 
                                     if (go == null)
@@ -179,8 +182,7 @@ public static class JSONSerialization
 
                                 field.SetValue(script, value);
                             }
-
-                        } while (!currLine.Contains("}") || isGameObject);
+                        } while (!currLine.Contains("}") || objectsOpened-- > 1);
                         currLine = stream.ReadLine();
                     }
                     else //Passe au prochain script ou termine le fichier texte
@@ -192,12 +194,7 @@ public static class JSONSerialization
                         while (currLine != null && !currLine.Contains("Script")); //il peut être null quand le stream est terminé
                     }
                 }
-                else if (currLine.Contains("}")) //EndOfObject
-                {
-                    currLine = stream.ReadLine();
-                }
             }
-
         }
     }
 
@@ -299,7 +296,7 @@ public static class JSONSerialization
 
                     foreach (PropertyInfo property in properties)
                     {
-                        if (!property.Name.Contains("root") && property.CanWrite || property.Name.Contains("childCount"))
+                        if (property.Name != "root" && property.Name != "scene" && property.CanWrite || property.Name.Contains("childCount"))
                         {
                             object propertyValue = property.GetValue(component);
 
@@ -326,7 +323,7 @@ public static class JSONSerialization
                                 }
                                 value += "\n";
                             }
-                            else if (property.Name.Contains("parent"))
+                            else if (property.Name == "parent")
                             {
                                 value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
                             }
@@ -397,6 +394,32 @@ public static class JSONSerialization
             }
             RemoveLast(",", ref value);
             value += "\n},\n";
+        }
+        else if (_jsonObject.type == typeof(RenderTexture))
+        {
+            string objToString = _jsonObject.obj.ToString();
+            int lastIndex = objToString.LastIndexOf(" ");
+            objToString = objToString.Remove(lastIndex, objToString.Length - lastIndex);
+            value += "\"" + objToString + "\",\n";
+            //value += "\n{\n";
+            //RenderTexture renderTexture = _jsonObject.obj as RenderTexture;
+            //RenderTextureDescriptor descriptor = renderTexture.descriptor;
+
+            //PropertyInfo[] properties = descriptor.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            //foreach (PropertyInfo property in properties)
+            //{
+            //    if (property.CanWrite)
+            //    {
+            //        object propertyValue = property.GetValue(descriptor);
+
+            //        if (propertyValue == null)
+            //            value += "\"" + property.Name + "\" : null,\n";
+            //        else
+            //            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
+            //    }
+            //}
+            //RemoveLast(",", ref value);
+            //value += "\n},\n";
         }
         return value;
     }
@@ -577,7 +600,7 @@ public static class JSONSerialization
                 PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
                 foreach (PropertyInfo property in properties)
                 {
-                    if (property.CanWrite || property.Name.Contains("childCount"))
+                    if (property.CanWrite && property.Name != "scene" || property.Name.Contains("childCount"))
                     {
                         string[] parts = _currLine.Split(':');
                         Filter(ref parts[0]);
@@ -627,7 +650,7 @@ public static class JSONSerialization
                     Material[] materials = new Material[materialsName.Length];
                     for (int k = 0; k < materials.Length; k++)
                     {
-                        materials[k] = materialsName[k].Contains("Default-MaterialInstance") ? new Material(Shader.Find("Standard")) : Resources.Load<Material>("Materials/" + materialsName[k]);
+                        materials[k] = materialsName[k].Contains("Default-Material") ? new Material(Shader.Find("Standard")) : Resources.Load<Material>("Materials/" + materialsName[k]);
                     }
 
                     if (j == 0)
@@ -639,6 +662,7 @@ public static class JSONSerialization
                 }
 
             }
+            
             _currLine = _stream.ReadLine();
         }
 
@@ -719,6 +743,54 @@ public static class JSONSerialization
         }
 
         return mesh.ConvertTo(typeof(object));
+    }
+    static object RenderTextureFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
+    {
+        RenderTexture renderTexture = null;
+
+        if (!_currLine.Contains("null"))
+        {
+            string renderTextureName = _currLine.Split(':')[1].Remove(0, 2);
+            renderTextureName = renderTextureName.Remove(renderTextureName.IndexOf("\""));
+            renderTexture = Resources.Load<RenderTexture>(renderTextureName);
+            //_currLine = _stream.ReadLine();
+            //_currLine = _stream.ReadLine(); //Je mets le curseur sur la premiere propriete
+
+            //RenderTextureDescriptor descriptor = new RenderTextureDescriptor();
+            //object descriptorObject = descriptor; //Pour ensuite assigner les valeurs à la reference de descriptor car c'est une struct
+
+            //PropertyInfo[] properties = descriptorObject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            //foreach (PropertyInfo property in properties)
+            //{
+            //    string[] parts = _currLine.Split(':');
+
+            //    if (property.CanWrite)
+            //    {
+            //        for (int j = 0; j < parts.Length; j++)
+            //        {
+            //            Filter(ref parts[j]);
+            //        }
+
+            //        if (property.Name == parts[0])
+            //        {
+            //            object value = null;
+
+            //            if (!parts[1].Contains("null"))
+            //            {
+            //                value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
+            //            }
+
+            //            property.SetValue(descriptorObject, value);
+
+            //        }
+            //        _currLine = _stream.ReadLine();
+            //    }
+            //}
+            //descriptor = (RenderTextureDescriptor)descriptorObject;
+            //renderTexture = new RenderTexture(descriptor);
+        }
+
+        return renderTexture.ConvertTo(typeof(object));
     }
     static object Matrix4x4FromString(string _stringValue)
     {
@@ -912,7 +984,11 @@ public static class JSONSerialization
         else if (_objectType == typeof(Mesh))
         {
             value = MeshFromString(ref _currLine, _stream, ref _go);
-        }
+        }     
+        else if (_objectType == typeof(RenderTexture))
+        {
+            value = RenderTextureFromString(ref _currLine, _stream, ref _go);
+        }     
         else if (_objectType == typeof(Color))
         {
             value = ColorFromString(_strValue);
