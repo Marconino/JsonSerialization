@@ -340,6 +340,24 @@ public static class JSONSerialization
                         value += ParseArray(new JSONObject("materials", typeof(string[]), materialsName));
                         value += ParseArray(new JSONObject("sharedMaterials", typeof(string[]), sharedMaterialsName));
                     }
+
+                    if (componentType.BaseType == typeof(Collider))
+                    {
+                        Collider collider = (Collider)component;
+                        string physicsMaterialName = collider.material.name;
+                        string sharedPhysicsMaterialName = collider.sharedMaterial.name;
+
+                        if (physicsMaterialName != string.Empty && sharedPhysicsMaterialName != string.Empty)
+                        {
+                            value += "\"physicsMaterial\" : \"" + physicsMaterialName.Replace(" (Instance)", string.Empty) + "\",\n";
+                            value += "\"sharedPhysicsMaterial\" : \"" + sharedPhysicsMaterialName.Replace(" (Instance)", string.Empty) + "\",\n";
+                        }
+                        else
+                        {
+                            value += "\"physicsMaterial\" : null,\n"; 
+                            value += "\"sharedPhysicsMaterial\" : null,\n"; 
+                        }
+                    }
                 }
                 else //Est un component personnalisé
                 {
@@ -660,7 +678,32 @@ public static class JSONSerialization
 
                     _currLine = _stream.ReadLine();
                 }
+            }
+            if (componentType.BaseType == typeof(Collider))
+            {
+                Collider collider = currComponent as Collider;
 
+                for (int j = 0; j < 2; j++)
+                {
+                    if (!_currLine.Contains("null"))
+                    {
+                        string[] parts = _currLine.Split(':');
+
+                        for (int k = 0; k < parts[1].Length; k++)
+                        {
+                            parts[1] = parts[1].Replace("\"", string.Empty);
+                        }
+                        parts[1] = parts[1].Trim(' ', ',');
+
+                        PhysicMaterial physicMaterial = Resources.Load<PhysicMaterial>("PhysicsMaterials/" + parts[1]);
+
+                        if (j == 0)
+                            collider.material = physicMaterial;
+                        else
+                            collider.sharedMaterial = physicMaterial;
+                    }
+                    _currLine = _stream.ReadLine();
+                }
             }
             
             _currLine = _stream.ReadLine();
