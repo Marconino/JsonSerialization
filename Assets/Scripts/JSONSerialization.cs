@@ -1,44 +1,147 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using Unity.VisualScripting;
 using UnityEngine;
 using System.Globalization;
-using UnityEngine.Windows;
-using System.Runtime.InteropServices.ComTypes;
+using System.Linq;
+using Newtonsoft.Json.Linq;
+using UnityEngine.SceneManagement;
+using System.Text;
+using System.Runtime.Serialization;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class JSONRead : Attribute { }
 
-class JSONObject
+enum RemoveCharState
 {
-    public FieldInfo fieldInfo;
-    public Type type;
-    public object obj;
-    public string fieldName = string.Empty;
-
-    public JSONObject(FieldInfo _fieldInfo, Type _type, object _obj)
-    {
-        fieldInfo = _fieldInfo;
-        type = _type;
-        obj = _obj;
-    }
-
-    public JSONObject(string _name, Type _type, object _obj)
-    {
-        fieldName = _name;
-        fieldInfo = null;
-        type = _type;
-        obj = _obj;
-    }
+    Anywhere,
+    Last
 }
+
 
 public static class JSONSerialization
 {
-    static Dictionary<MonoBehaviour, List<JSONObject>> jsonObjects = new Dictionary<MonoBehaviour, List<JSONObject>>();
+    static Dictionary<MonoBehaviour, Dictionary<string, object>> jsonObjects;
 
+    static JSONSerialization()
+    {
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+
+        jsonObjects = new Dictionary<MonoBehaviour, Dictionary<string, object>>();
+    }
+
+    #region PublicMethods
+    public static void Save(string _filename)
+    {
+        UpdateJSONObjects();
+
+        using (StreamWriter stream = new StreamWriter(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
+        {
+            StringBuilder json = new StringBuilder("{\n");
+
+            int index = 0;
+            foreach (MonoBehaviour script in jsonObjects.Keys)
+            {
+                json.Append((index == 0) ? "\"[Script] " + script.name + "\" :\n{\n" : ",\n\"[Script] " + script.name + "\" :\n{\n");
+
+                foreach (var jsonObject in jsonObjects[script])
+                {
+                    json.Append(jsonObject.Value.ToJsonFormat(jsonObject.Key));
+                }
+                RemoveChar(ref json, RemoveCharState.Last, ',');
+
+                json.Append("\n}");
+                index++;
+            }
+            json.Append("\n}");
+            stream.Write(json);
+        }
+    }
+    public static void Load(string _filename)
+    {
+        UpdateJSONObjects();
+        
+        MonoBehaviour currentScript = null;
+        StringBuilder json = new StringBuilder();
+        Dictionary<string, GameObject> gameObjectsInstancied = new Dictionary<string, GameObject>();
+
+        using (StreamReader stream = new StreamReader(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
+        {
+            json.Append(stream.ReadToEnd());
+        }
+
+        RemoveChar(ref json, RemoveCharState.Anywhere, '{', '}');
+        string[] jsonLines = json.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Where(str => str != ",").ToArray();
+
+        for (int i = 0; i < jsonLines.Length; i++)
+        {
+            string[] parts = jsonLines[i].Split(':');
+
+            if (parts[0].Contains("Script"))
+            {
+                parts[0] = parts[0].Remove(0, parts[0].IndexOf(']') + 1).Trim(' ', '\"');
+                currentScript = jsonObjects.Keys.FirstOrDefault(n => n.name == parts[0]);
+
+                if (currentScript == null)
+                {
+                    Assembly assembly = Assembly.GetExecutingAssembly();
+                    Type test = assembly.ExportedTypes.Where(n => parts[0].Contains(n.FullName)).ToArray()[0];
+                    GameObject gameObject = new GameObject(parts[0]);
+                    currentScript = gameObject.AddComponent(test).GetComponent<MonoBehaviour>();
+                    GetJSONObjects(currentScript);
+                }
+            }
+            else if (parts[1] == string.Empty)
+            {
+                Type scriptType = currentScript.GetType();
+                RemoveChar(ref parts[0], RemoveCharState.Last, ',');
+                parts[0] = parts[0].Trim('\"', ' ');
+                FieldInfo field = scriptType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                GameObject gameObject = field.GetValue(currentScript) as GameObject;
+
+                if (gameObject == null && !gameObjectsInstancied.TryGetValue(field.Name, out gameObject))
+                {
+                    parts = jsonLines[++i].Split(':');
+                    RemoveChar(ref parts[1], RemoveCharState.Last, ',');
+                    parts[1] = parts[1].Trim('\"', ' ');
+
+                    GameObject goInHierarchy = SceneManager.GetActiveScene().GetRootGameObjects().FirstOrDefault(n => n.name == parts[1]);
+
+                    if (goInHierarchy == null)
+                    {
+                        gameObject = new GameObject();
+                        gameObjectsInstancied.Add(field.Name, gameObject);
+                        string fieldName = jsonObjects[currentScript].Keys.FirstOrDefault(n => n == field.Name);
+                        jsonObjects[currentScript][fieldName] = gameObject;
+                    }
+                    else
+                    {
+                        gameObject = goInHierarchy;
+                    }
+                    --i;
+                }
+
+                GameObjectFromString(ref jsonLines, ref i, ref gameObject);
+                field.SetValue(currentScript, gameObject);
+            }
+            else
+            {
+                RemoveChar(ref parts[1], RemoveCharState.Last, ',');
+                for (int j = 0; j < parts.Length; j++)
+                {
+                    parts[j] = parts[j].Trim('\"', ' ');
+                }
+
+                Type scriptType = currentScript.GetType();
+                FieldInfo field = scriptType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+                object value = parts[1].FromJsonString(field.FieldType);
+                field.SetValue(currentScript, value);
+            }
+        }
+    }
     public static void GetJSONObjects(MonoBehaviour _script)
     {
         Type scriptType = _script.GetType();
@@ -48,792 +151,411 @@ public static class JSONSerialization
         {
             if (Attribute.IsDefined(field, typeof(JSONRead)))
             {
-                JSONObject jsonObject = new JSONObject(field, field.FieldType, field.GetValue(_script).ConvertTo<object>());
-
                 if (jsonObjects.ContainsKey(_script))
                 {
-                    if (!jsonObjects[_script].Contains(jsonObject))
-                        jsonObjects[_script].Add(jsonObject);
+                    if (!jsonObjects[_script].ContainsKey(field.Name))
+                        jsonObjects[_script].Add(field.Name, field.GetValue(_script));
                 }
                 else
                 {
-                    List<JSONObject> list = new List<JSONObject>() { jsonObject };
-                    jsonObjects.Add(_script, list);
+                    jsonObjects.Add(_script, new Dictionary<string, object>());
                 }
             }
         }
     }
-    public static void Save(string _filename)
-    {
-        UpdateJSONObjects();
-
-        using (StreamWriter stream = new StreamWriter(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
-        {
-            string json = "{\n";
-
-            int index = 0;
-            foreach (MonoBehaviour script in jsonObjects.Keys)
-            {
-                if (index == 0)
-                {
-                    json += "\"Script : " + script.name + "\" : \n{\n";
-                }
-                else
-                {
-                    json += ",\n\"Script : " + script.name + "\" : \n{\n";
-                }
-
-                foreach (JSONObject jsonObject in jsonObjects[script])
-                {
-                    json += Parse(jsonObject);
-
-                    RemoveLast("\n", ref json);
-
-                    json += ",\n";
-                }
-                RemoveLast(",", ref json);
-
-                json += "\n}";
-                index++;
-            }
-
-
-            json += "\n}";
-            stream.Write(json);
-        }
-    }
-    public static void Load(string _filename)
-    {
-        UpdateJSONObjects();
-
-        using (StreamReader stream = new StreamReader(Application.streamingAssetsPath + "/Saves/" + _filename + ".txt"))
-        {
-            string currLine = stream.ReadLine();
-            currLine = stream.ReadLine(); //For first {
-
-            Dictionary<string, GameObject> gameObjectsInstancied = new Dictionary<string, GameObject>();
-            int objectsOpened = 0;
-
-            while (!stream.EndOfStream)
-            {
-                if (currLine.Contains("Script"))
-                {
-                    string scriptName = currLine;
-                    Filter(ref scriptName);
-
-                    MonoBehaviour script = jsonObjects.FirstOrDefault(n => n.Key.name == scriptName).Key;
-
-                    if (script != null)
-                    {
-                        Type scriptType = script.GetType();
-                        objectsOpened++;
-
-                        do
-                        {
-                            currLine = stream.ReadLine();
-
-                            if (currLine.Contains(":"))
-                            {
-                                string[] parts = currLine.Split(':');
-
-                                for (int i = 0; i < parts.Length; i++)
-                                {
-                                    Filter(ref parts[i]);
-                                }
-
-                                FieldInfo field = scriptType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-                                object value = null;
-                                if (field.FieldType.Name.Contains("Vector"))
-                                {
-                                    value = VectorFromString(parts[1], field.FieldType);
-                                }
-                                else if (field.FieldType.Name.Contains("List") || field.FieldType.IsArray)
-                                {
-                                    value = ArrayFromString(parts[1], field.FieldType);
-                                }
-                                else if (field.FieldType.IsEnum)
-                                {
-                                    value = Enum.Parse(field.FieldType, parts[1]);
-                                }
-                                else if (field.FieldType == typeof(GameObject))
-                                {
-                                    objectsOpened++;
-
-                                    GameObject go = (GameObject)field.GetValue(script).ConvertTo(typeof(GameObject));
-
-                                    if (go == null)
-                                    {
-                                        if (!gameObjectsInstancied.TryGetValue(field.Name, out go))
-                                        {
-                                            go = new GameObject();
-                                            gameObjectsInstancied.Add(field.Name, go);
-                                            int indexOldGO = jsonObjects[script].FindIndex(n => n.fieldInfo.Name == field.Name);
-                                            jsonObjects[script][indexOldGO].obj = go;
-                                        }
-                                    }
-                                    GameObjectFromString(ref currLine, stream, ref go);
-                                    value = go;
-                                }
-                                else
-                                {
-                                    value = Convert.ChangeType(parts[1], field.FieldType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
-                                }
-
-                                field.SetValue(script, value);
-                            }
-                        } while (!currLine.Contains("}") || objectsOpened-- > 1);
-                        currLine = stream.ReadLine();
-                    }
-                    else //Passe au prochain script ou termine le fichier texte
-                    {
-                        do
-                        {
-                            currLine = stream.ReadLine();
-                        }
-                        while (currLine != null && !currLine.Contains("Script")); //il peut être null quand le stream est terminé
-                    }
-                }
-            }
-        }
-    }
+    #endregion
 
     #region SaveMethods
-    static string Parse(JSONObject _jsonObject)
+    static StringBuilder FormatStringToJson<T>(T _value, string _fieldName)
     {
-        string valueParsed = string.Empty;
-        if (_jsonObject.type.IsArray)
+        bool hasFieldName = _fieldName != string.Empty;
+        StringBuilder stringBuilder = new StringBuilder(hasFieldName ? "\"" + _fieldName + "\" : " : string.Empty);
+        Type type = _value.GetType();
+        string valueStr = string.Empty;
+
+        if (type == typeof(bool))
         {
-            valueParsed += ParseArray(_jsonObject);
-            //Debug.Log(jsonObject.type.Name + " is a array.");
+            valueStr = _value.ToString().ToLower();
         }
-        else if (_jsonObject.type.IsEnum)
+        else if (type.IsPrimitive)
         {
-            valueParsed += ParseEnum(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is an enum.");
+            valueStr = _value.ToString();
         }
-        else if (_jsonObject.type.IsInterface)
+        else
         {
-            //Debug.Log(_jsonObject.type.Name + " is an interface.");
+            valueStr = "\"" + _value.ToString() + "\"";
         }
-        else if (_jsonObject.type.IsPrimitive)
-        {
-            valueParsed += ParsePrimitive(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is a primitive type.");
-        }
-        else if (_jsonObject.type.IsValueType)
-        {
-            valueParsed += ParseValueType(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is a value type (struct).");
-        }
-        else if (_jsonObject.type.IsClass)
-        {
-            valueParsed += ParseClass(_jsonObject);
-            //Debug.Log(_jsonObject.type.Name + " is a class.");
-        }
-        return valueParsed;
+
+        stringBuilder.Append(hasFieldName ? valueStr + ",\n" : valueStr + ", ");
+        return stringBuilder;
     }
-    static string ParseClass(JSONObject _jsonObject)
+    static StringBuilder FormatMeshToString(Mesh _mesh, string _fieldName)
     {
-        string value = string.Empty;
+        BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
 
-        if (_jsonObject.fieldInfo != null)
-            value = "\"" + _jsonObject.fieldInfo.Name + "\" : ";
-        else if (_jsonObject.fieldName != string.Empty)
-            value = "\"" + _jsonObject.fieldName + "\" : ";
+        StringBuilder value = new StringBuilder("\"[ObjectComponent] " + _fieldName + "\" :\n{\n");
 
-        if (_jsonObject.type.Name.Contains("List"))
+        foreach (PropertyInfo property in _mesh.GetType().GetProperties(bindingFlags))
         {
-            value += "[";
-            List<object> list = _jsonObject.obj.ConvertTo<List<object>>();
-
-            if (list != null)
+            if (property.CanWrite)
             {
-                foreach (object item in list)
-                {
-                    Type type = item.GetType();
+                object propertyValue = property.GetValue(_mesh);
 
-                    JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
-                    value += Parse(itemJSONObject);
+                if (propertyValue == null)
+                    value.Append("\"" + property.Name + "\" : null,\n");
+                else
+                {
+                    value.Append(propertyValue.ToJsonFormat(property.Name));
                 }
             }
-
-            RemoveLast(",", ref value);
-
-            if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
-                value += "]\n";
-            else
-                value += "],\n";
         }
-        else if (_jsonObject.type.Name == "String")
-        {
-            if (value == string.Empty) //c'est un element d'une liste
-                value = "\"" + _jsonObject.obj + "\", ";
-            else
-                value += "\"" + _jsonObject.obj + "\"\n";
-
-        }
-        else if (_jsonObject.type.Name.Contains("GameObject"))
-        {
-            value += "\n{";
-
-            GameObject gameObject = (GameObject)_jsonObject.obj.ConvertTo(typeof(GameObject));
-            value += "\n\"GO_Name\" : \"" + gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + gameObject.tag + "\",\n" + "\"GO_Layer\" : " + gameObject.layer + ",\n" + "\"GO_IsActive\" : " + gameObject.activeSelf.ToString().ToLower() + ",\n";
-
-            Component[] components = gameObject.GetComponents<Component>();
-            bool isChild = _jsonObject.fieldName.Contains("Child");
-
-            value += "\"Components\" : " + components.Length + ",\n";
-            for (int i = 0; i < components.Length; i++)
-            {
-                Component component = components[i];
-                Type componentType = component.GetType();
-                value += "\"" + componentType + "\" : \n{\n";
-
-                if (componentType.BaseType == typeof(Component) || componentType.Name.Contains("Mesh") || componentType.ToString().Contains("UnityEngine")) //Est un component d'Unity
-                {
-                    PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-
-                    foreach (PropertyInfo property in properties)
-                    {
-                        if (property.Name != "root" && property.Name != "scene" && property.CanWrite || property.Name.Contains("childCount"))
-                        {
-                            object propertyValue = property.GetValue(component);
-
-                            if (propertyValue == null)
-                                value += "\"" + property.Name + "\" : null,\n";
-                            else if (property.Name.Contains("childCount"))
-                            {
-                                int childrenCount = (int)propertyValue.ConvertTo(typeof(int));
-                                value += "\"" + property.Name + "\"" + ": ";
-
-                                if (childrenCount > 0)
-                                {
-                                    value += "[";
-                                    for (int j = 0; j < childrenCount; j++)
-                                    {
-                                        value += "\"" + component.transform.GetChild(j).name + "\",";
-                                    }
-                                    RemoveLast(",", ref value);
-                                    value += "],";
-                                }
-                                else
-                                {
-                                    value += "0,";
-                                }
-                                value += "\n";
-                            }
-                            else if (property.Name == "parent")
-                            {
-                                value += "\"" + property.Name + "\"" + ": \"" + component.transform.parent + "\",\n";
-                            }
-                            else
-                                value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
-                        }
-                    }
-
-                    if (componentType == typeof(MeshRenderer))
-                    {
-                        MeshRenderer renderer = (MeshRenderer)component;
-                        string[] materialsName = renderer.materials.Select(n => n != null ? n.name.Replace(" (Instance)", string.Empty) : null).ToArray();
-                        string[] sharedMaterialsName = renderer.materials.Select(n => n != null ? n.name.Replace(" (Instance)", string.Empty) : null).ToArray();
-                        value += ParseArray(new JSONObject("materials", typeof(string[]), materialsName));
-                        value += ParseArray(new JSONObject("sharedMaterials", typeof(string[]), sharedMaterialsName));
-                    }
-
-                    if (componentType.BaseType == typeof(Collider))
-                    {
-                        Collider collider = (Collider)component;
-                        string physicsMaterialName = collider.material.name;
-                        string sharedPhysicsMaterialName = collider.sharedMaterial.name;
-
-                        if (physicsMaterialName != string.Empty && sharedPhysicsMaterialName != string.Empty)
-                        {
-                            value += "\"physicsMaterial\" : \"" + physicsMaterialName.Replace(" (Instance)", string.Empty) + "\",\n";
-                            value += "\"sharedPhysicsMaterial\" : \"" + sharedPhysicsMaterialName.Replace(" (Instance)", string.Empty) + "\",\n";
-                        }
-                        else
-                        {
-                            value += "\"physicsMaterial\" : null,\n"; 
-                            value += "\"sharedPhysicsMaterial\" : null,\n"; 
-                        }
-                    }
-                }
-                else //Est un component personnalisé
-                {
-                    FieldInfo[] fields = componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-                    foreach (FieldInfo field in fields)
-                    {
-                        object propertyValue = field.GetValue(component);
-
-                        if (propertyValue == null)
-                            value += "\"" + field.Name + "\" : null,\n";
-                        else
-                            value += Parse(new JSONObject(field.Name, field.FieldType, propertyValue));
-                    }
-                }
-                RemoveLast(",", ref value);
-                value += "\n},\n";
-
-                if (i + 1 == components.Length) //Children
-                {
-                    int childrenCount = gameObject.transform.childCount;
-
-                    for (int j = 0; j < childrenCount; j++)
-                    {
-                        value += Parse(new JSONObject("Child " + j, typeof(GameObject), gameObject.transform.GetChild(j).gameObject));
-                    }
-                }
-            }
-            RemoveLast(",", ref value);
-
-            if (isChild)
-                value += "\n},\n";
-            else
-                value += "\n}\n";
-        }
-        else if (_jsonObject.type.Name.Contains("Mesh"))
-        {
-            value += "\n{\n";
-            Mesh mesh = (Mesh)_jsonObject.obj.ConvertTo(typeof(Mesh));
-            PropertyInfo[] properties = _jsonObject.type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-            foreach (PropertyInfo property in properties)
-            {
-                if (property.CanWrite)
-                {
-                    object propertyValue = property.GetValue(mesh);
-
-                    if (propertyValue == null)
-                        value += "\"" + property.Name + "\" : null,\n";
-                    else
-                        value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
-                }
-            }
-            RemoveLast(",", ref value);
-            value += "\n},\n";
-        }
-        else if (_jsonObject.type == typeof(RenderTexture))
-        {
-            string objToString = _jsonObject.obj.ToString();
-            int lastIndex = objToString.LastIndexOf(" ");
-            objToString = objToString.Remove(lastIndex, objToString.Length - lastIndex);
-            value += "\"" + objToString + "\",\n";
-            //value += "\n{\n";
-            //RenderTexture renderTexture = _jsonObject.obj as RenderTexture;
-            //RenderTextureDescriptor descriptor = renderTexture.descriptor;
-
-            //PropertyInfo[] properties = descriptor.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-            //foreach (PropertyInfo property in properties)
-            //{
-            //    if (property.CanWrite)
-            //    {
-            //        object propertyValue = property.GetValue(descriptor);
-
-            //        if (propertyValue == null)
-            //            value += "\"" + property.Name + "\" : null,\n";
-            //        else
-            //            value += Parse(new JSONObject(property.Name, property.PropertyType, propertyValue));
-            //    }
-            //}
-            //RemoveLast(",", ref value);
-            //value += "\n},\n";
-        }
+        RemoveChar(ref value, RemoveCharState.Last, ',');
+        value.Append("\n},\n");
         return value;
     }
-    static string ParseArray(JSONObject _jsonObject)
+    static StringBuilder FormatGameObjectToString(GameObject _gameObject, string _fieldName)
     {
-        string value = string.Empty;
+        StringBuilder value = new StringBuilder("\"" + _fieldName + "\" :\n{\n");
+        value.Append("\"GO_Name\" : \"" + _gameObject.name + "\",\n" + "\"GO_Tag\" : \"" + _gameObject.tag + "\",\n" + "\"GO_Layer\" : " + _gameObject.layer + ",\n" + "\"GO_IsActive\" : " + _gameObject.activeSelf.ToString().ToLower() + ",\n" + "\"GO_ChildCount\" : " + _gameObject.transform.childCount + ",\n");
 
-        if (_jsonObject.fieldInfo == null)
-            value = "\"" + _jsonObject.fieldName + "\" : [";
-        else
-            value = "\"" + _jsonObject.fieldInfo.Name + "\" : [";
+        Component[] components = _gameObject.GetComponents<Component>();
 
-        Array array = (Array)_jsonObject.obj.ConvertTo(typeof(Array));
-
-        if (array != null)
+        value.Append("\"Components\" : " + components.Length + ",\n");
+        for (int i = 0; i < components.Length; i++)
         {
-            foreach (object item in array)
-            {
-                Type type = item.GetType();
-
-                JSONObject itemJSONObject = new JSONObject(string.Empty, type, item);
-                value += Parse(itemJSONObject);
-            }
+            Component component = components[i];
+            value.Append(component.ToJsonFormat(component.name));
         }
 
-        RemoveLast(",", ref value);
-        if (_jsonObject.fieldInfo != null && _jsonObject.fieldName == string.Empty)
-            value += "]\n";
-        else
-            value += "],\n";
+        //Children
+        for (int j = 0; j < _gameObject.transform.childCount; j++)
+        {
+            value.Append(_gameObject.transform.GetChild(j).gameObject.ToJsonFormat("Child_" + _gameObject.transform.GetChild(j).name));
+        }
+
+        RemoveChar(ref value, RemoveCharState.Last, ',');
+        value.Append("\n},\n");
+        return value;
+    }
+    static StringBuilder FormatComponentToString(Component _component, string _fieldName)
+    {
+        Type componentType = _component.GetType();
+        StringBuilder value = new StringBuilder("\"" + componentType + "\" :\n{\n");
+        BindingFlags bindingFlags = BindingFlags.Public | BindingFlags.Instance;
+
+        foreach (PropertyInfo property in componentType.GetProperties(bindingFlags | BindingFlags.DeclaredOnly))
+        {
+            if (property.CanWrite && property.Name != "root" && property.Name != "scene")
+            {
+                object propertyValue = property.GetValue(_component);
+
+                if (propertyValue == null)
+                    value.Append("\"" + property.Name + "\" : null,\n");
+                else if (property.Name == "parent")
+                    value.Append("\"" + property.Name + "\"" + ": \"" + _component.transform.parent + "\",\n");
+                else
+                {
+                    value.Append(propertyValue.ToJsonFormat(property.Name));
+                }
+            }
+        } //Unity Component
+
+        foreach (FieldInfo field in componentType.GetFields(bindingFlags | BindingFlags.NonPublic))
+        {
+            object propertyValue = field.GetValue(_component);
+
+            if (propertyValue == null)
+                value.Append("\"" + field.Name + "\" : null,\n");
+            else
+            {
+                value.Append(propertyValue.ToJsonFormat(field.Name));
+            }
+        } //Custom Component
+
+        if (componentType == typeof(MeshRenderer))
+        {
+            MeshRenderer renderer = (MeshRenderer)_component;
+            value.Append(renderer.material.ToJsonFormat("material"));
+            value.Append(renderer.sharedMaterial.ToJsonFormat("sharedMaterial"));
+            value.Append(renderer.materials.ToJsonFormat("materials"));
+            value.Append(renderer.sharedMaterials.ToJsonFormat("sharedMaterials"));
+        }
+
+        if (componentType.BaseType == typeof(Collider))
+        {
+            Collider collider = (Collider)_component;
+            value.Append(collider.material.ToJsonFormat("physicMaterial"));
+            value.Append(collider.sharedMaterial.ToJsonFormat("sharedPhysicMaterial"));
+        }
+
+        RemoveChar(ref value, RemoveCharState.Last, ',');
+        value.Append("\n},\n");
 
         return value;
     }
-    static string ParseMatrix4x4(JSONObject _jsonObject)
+    static StringBuilder FormatMatrix4x4ToString(Matrix4x4 _matrix4x4, string _fieldName)
     {
-        string value = string.Empty;
-
-        Matrix4x4 matrix4x4 = (Matrix4x4)_jsonObject.obj.ConvertTo(typeof(Matrix4x4));
+        StringBuilder value = new StringBuilder("\"" + _fieldName + "\" : \"");
         Vector4[] rows = new Vector4[4];
 
         for (int i = 0; i < 4; i++)
         {
-            rows[i] = matrix4x4.GetRow(i);
-            value += rows[i].ToString() + "|";
+            rows[i] = _matrix4x4.GetRow(i);
+            value.Append(rows[i].ToString() + "|");
         }
-        RemoveLast("|", ref value);
+        RemoveChar(ref value, RemoveCharState.Last, '|');
+        value.Append("\",\n");
         return value;
     }
-    static string ParseEnum(JSONObject _jsonObject)
+    static StringBuilder MaterialToString<T>(T material, string _fieldName)
     {
-        string value = _jsonObject.obj.ToString();
+        StringBuilder value = null;
 
-        string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
-            returnStr = "\"" + value + "\", ";
-        else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
-        else
-            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + value + "\"\n";
-
-        return returnStr;
-    }
-    static string ParseValueType(JSONObject _jsonObject)
-    {
-        string returnStr = string.Empty;
-
-        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
-            returnStr = "\"" + _jsonObject.obj + "\", ";
-        else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + (_jsonObject.type == typeof(Matrix4x4) ? ParseMatrix4x4(_jsonObject) : _jsonObject.obj) + "\",\n";
-        else
-            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : \"" + _jsonObject.obj + "\"\n";
-
-        return returnStr;
-    }
-    static string ParsePrimitive(JSONObject _jsonObject)
-    {
-        string value = _jsonObject.obj.ToString().ToLower();
-
-        if (_jsonObject.type == typeof(float) || _jsonObject.type == typeof(double))
+        string materialName = material.ToString();
+        int indexInstanceStr = materialName.IndexOf("(Instance)");
+        Type type = material.GetType();
+        if (type == typeof(Material))
         {
-            value = value.Replace(",", ".");
+            materialName = materialName.Substring(0, indexInstanceStr == -1 ? materialName.IndexOf("(UnityEngine.Material)") - 1 : materialName.IndexOf("(Instance)") - 1);
+
+            if (_fieldName == string.Empty)
+            {
+                value = new StringBuilder("\"" + materialName);
+            }
+            else value = new StringBuilder(_fieldName == "material" ? "\"material\" : \"" + materialName : "\"sharedMaterial\" : \"" + materialName);
+        }
+        else
+        {
+            materialName = materialName.Substring(0, indexInstanceStr == -1 ? materialName.IndexOf("(UnityEngine.PhysicMaterial)") - 1 : materialName.IndexOf("(Instance)") - 1);
+            if (_fieldName == string.Empty)
+            {
+                value = new StringBuilder("\"" + materialName);
+            }
+            else value = new StringBuilder(_fieldName == "physicMaterial" ? "\"physicMaterial\" : \"" + materialName : "\"sharedPhysicMaterial\" : \"" + materialName);
+        }
+        value.Append("\",\n");
+
+        return value;
+    }
+    static StringBuilder ArrayToString(object array, string _fieldName)
+    {
+        StringBuilder arrayParsed = new StringBuilder("\"" + _fieldName + "\" : [");
+
+        List<object> arrayObjects = (List<object>)array.ConvertTo(typeof(List<object>));
+
+        if (array != null)
+        {
+            foreach (object item in arrayObjects)
+            {
+                arrayParsed.Append(item.ToJsonFormat(string.Empty));
+            }
+            RemoveChar(ref arrayParsed, RemoveCharState.Last, ',');
         }
 
-        string returnStr = string.Empty;
-        if (_jsonObject.fieldInfo == null && _jsonObject.fieldName == string.Empty)
-            returnStr = value + ", ";
-        else if (_jsonObject.fieldName != string.Empty)
-            returnStr = "\"" + _jsonObject.fieldName + "\" : \"" + value + "\",\n";
-        else
-            returnStr = "\"" + _jsonObject.fieldInfo.Name + "\" : " + value + "\n";
-
-        return returnStr;
+        arrayParsed.Append("],\n");
+        return arrayParsed;
     }
+
     #endregion
 
     #region LoadMethods
-    static object GameObjectFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
+    static object VectorFromString(string _stringValue, Type _vectorType)
     {
-        int step = 0;
-        int componentsCount = 0;
-        _currLine = _stream.ReadLine();
+        _stringValue = _stringValue.Trim('(', ')');
+        bool hasFloat = _vectorType == typeof(Vector2) || _vectorType == typeof(Vector3) || _vectorType == typeof(Vector4) || _vectorType == typeof(Quaternion);
+        string[] parts = _stringValue.Split(',');
+        object[] values = new object[parts.Length];
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (hasFloat)
+                values[i] = float.Parse(parts[i]);
+            else
+                values[i] = int.Parse(parts[i]);
+        }
+
+        ConstructorInfo constructorInfos = _vectorType.GetConstructors()[0];
+        return constructorInfos.Invoke(values);
+    }
+    static object ColorFromString(string _stringValue)
+    {
+        string colorStr = _stringValue.Remove(0, 4); //formattage en Vector4
+        Vector4 colorValues = (Vector4)VectorFromString(colorStr, typeof(Vector4));
+
+        return new Color(colorValues.x, colorValues.y, colorValues.z, colorValues.w);
+    }
+    static object RectFromString(string _stringValue)
+    {
+        string rectString = _stringValue.Replace("x:", string.Empty).Replace("y:", string.Empty).Replace("width:", string.Empty).Replace("height:", string.Empty);
+        Vector4 rectValues = (Vector4)VectorFromString(rectString, typeof(Vector4));
+        return new Rect(rectValues.x, rectValues.y, rectValues.z, rectValues.w);
+    }
+    static void ComponentFromString(ref string[] _lines, ref int _i, ref GameObject _gameObject)
+    {
+        string[] parts = _lines[++_i].Split(':');
+        RemoveChar(ref parts[0], RemoveCharState.Last, ',');
+        parts[0] = parts[0].Trim('\"', ' ');
+
+        bool isCustomComponent = false;
+
+        parts[0] += ",UnityEngine"; //Pour le formattage
+        Type componentType = Type.GetType(parts[0]);
+
+        if (componentType == null) //Est un component custom
+        {
+            isCustomComponent = true;
+            parts[0] = parts[0].Remove(parts[0].IndexOf(","));
+            componentType = Type.GetType(parts[0]);
+        }
+        Component[] components = _gameObject.GetComponents<Component>();
+        Component currComponent = components.FirstOrDefault(n => n.GetType() == componentType) ?? _gameObject.AddComponent(componentType);
+
+        bool isEndOfComponent = false;
 
         do
         {
-            _currLine = _stream.ReadLine();
-            string value = _currLine.Remove(0, _currLine.IndexOf(':'));
-            if (step > 1) //Pour ne pas changer le nom ni le tag enregistré
-                Filter(ref value);
-            else
+            if (_i < _lines.Length - 1)
             {
-                value = value.Remove(0, value.IndexOf('\"') + 1);
-                int lastIndex = value.LastIndexOf('\"');
-                value = value.Remove(lastIndex, value.Length - lastIndex);
+                parts = _lines[++_i].Split(':');
             }
 
-            switch (step)
+            if (!parts[0].Contains("[ObjectComponent]") && parts[1] == string.Empty || _i >= _lines.Length - 1)
             {
-                case 0: _go.name = value; break;
-                case 1: _go.tag = value; break;
-                case 2: _go.layer = int.Parse(value); break;
-                case 3: _go.SetActive(bool.Parse(value)); break;
-                case 4: componentsCount = int.Parse(value); break;
-            }
-            step++;
+                isEndOfComponent = true;
 
-        } while (step < 5); //Name, Tag, Layer, IsActive, Nb Components
-
-        _currLine = _stream.ReadLine();
-
-        Component[] components = _go.GetComponents<Component>();
-        string[] children = null;
-
-        for (int i = 0; i < componentsCount; i++)
-        {
-            bool isCustomComponent = false;
-            string componentName = _currLine;
-            Filter(ref componentName);
-            componentName += ",UnityEngine"; //Pour le formattage
-            Type componentType = Type.GetType(componentName);
-
-            if (componentType == null) //Est un component custom
-            {
-                isCustomComponent = true;
-                componentName = componentName.Remove(componentName.IndexOf(","));
-                componentType = Type.GetType(componentName);
-            }
-
-            Component currComponent = components.FirstOrDefault(n => n.GetType() == componentType) ?? _go.AddComponent(componentType);
-
-            _currLine = _stream.ReadLine();
-            _currLine = _stream.ReadLine(); //Je mets le curseur sur la premi�re propri�t�
-
-            if (isCustomComponent)
-            {
-                FieldInfo[] fields = componentType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-                foreach (FieldInfo field in fields)
+                if (_i < _lines.Length - 1)
                 {
-                    string[] parts = _currLine.Split(':');
-
-                    for (int j = 0; j < parts.Length; j++)
-                    {
-                        Filter(ref parts[j]);
-                    }
-
-                    if (field.Name == parts[0])
-                    {
-                        object value = GetObjectFromString(field.FieldType, parts[1], ref _currLine, ref _go, _stream);
-
-                        field.SetValue(currComponent, value);
-                    }
-                    _currLine = _stream.ReadLine();
+                    _i--;
                 }
             }
             else
             {
-                PropertyInfo[] properties = componentType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-                foreach (PropertyInfo property in properties)
+                for (int k = 0; k < parts.Length; k++)
                 {
-                    if (property.CanWrite && property.Name != "scene" || property.Name.Contains("childCount"))
-                    {
-                        string[] parts = _currLine.Split(':');
-                        Filter(ref parts[0]);
-
-                        if (property.Name.Contains("childCount"))
-                        {
-                            for (int k = 0; k < parts[1].Length; k++)
-                            {
-                                parts[1] = parts[1].Replace("\"", string.Empty);
-                            }
-                            parts[1] = parts[1].Trim(' ', ',');
-
-                            children = (string[])ArrayFromString(parts[1], typeof(string[]));
-                            if (children[0].Contains("0"))
-                                children = new string[0];
-                        }
-                        else if (property.Name == parts[0])
-                        {
-                            Filter(ref parts[1]);
-
-                            object value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
-
-                            if (property.Name.Contains("hierarchyCapacity"))
-                                property.SetValue(currComponent, _go.transform.hierarchyCapacity);
-                            else
-                                property.SetValue(currComponent, value);
-                        }
-                        _currLine = _stream.ReadLine();
-                    }
+                    parts[k] = parts[k].Trim(',', '\"', ' ');
                 }
-            }
-            if (componentType == typeof(MeshRenderer)) //Get materials and sharedMaterials
-            {
-                MeshRenderer meshRenderer = currComponent as MeshRenderer;
 
-                for (int j = 0; j < 2; j++)
+                parts[0] = parts[0].Remove(0, parts[0].IndexOf(" ") + 1); //J'enlève [ObjectComponent] si il y en a un
+
+                if (isCustomComponent)
                 {
-                    string[] parts = _currLine.Split(':');
+                    object value = null;
+                    FieldInfo fieldCustomComponent = componentType.GetField(parts[0], BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-                    for (int k = 0; k < parts[1].Length; k++)
+                    if (fieldCustomComponent.FieldType.Equals(typeof(Mesh)))
                     {
-                        parts[1] = parts[1].Replace("\"", string.Empty);
+                        value = MeshFromString(ref parts[1], ref _lines, ref _i);
                     }
-                    parts[1] = parts[1].Trim(' ', ',');
-
-                    string[] materialsName = (string[])ArrayFromString(parts[1], typeof(string[]));
-                    Material[] materials = new Material[materialsName.Length];
-                    for (int k = 0; k < materials.Length; k++)
+                    else if (parts[0] == "parent")
                     {
-                        materials[k] = materialsName[k].Contains("Default-Material") ? new Material(Shader.Find("Standard")) : Resources.Load<Material>("Materials/" + materialsName[k]);
+                        value = _gameObject.transform.parent;
                     }
-
-                    if (j == 0)
-                        meshRenderer.materials = materials;
+                    else if (fieldCustomComponent.FieldType == typeof(Rect))
+                    {
+                        string rectValues = _lines[_i].Remove(0, _lines[_i].IndexOf("("));
+                        RemoveChar(ref rectValues, RemoveCharState.Last, '\"');
+                        value = RectFromString(rectValues);
+                    }
                     else
-                        meshRenderer.sharedMaterials = materials;
-
-                    _currLine = _stream.ReadLine();
-                }
-            }
-            if (componentType.BaseType == typeof(Collider))
-            {
-                Collider collider = currComponent as Collider;
-
-                for (int j = 0; j < 2; j++)
-                {
-                    if (!_currLine.Contains("null"))
                     {
-                        string[] parts = _currLine.Split(':');
-
-                        for (int k = 0; k < parts[1].Length; k++)
-                        {
-                            parts[1] = parts[1].Replace("\"", string.Empty);
-                        }
-                        parts[1] = parts[1].Trim(' ', ',');
-
-                        PhysicMaterial physicMaterial = Resources.Load<PhysicMaterial>("PhysicsMaterials/" + parts[1]);
-
-                        if (j == 0)
-                            collider.material = physicMaterial;
-                        else
-                            collider.sharedMaterial = physicMaterial;
+                        value = parts[1].FromJsonString(fieldCustomComponent.FieldType);
                     }
-                    _currLine = _stream.ReadLine();
+
+                    fieldCustomComponent.SetValue(currComponent, value);
+                }
+                else
+                {
+                    object value = null;
+                    PropertyInfo propertyUnityComponent = componentType.GetProperty(parts[0]);
+                    bool hasMaterial = false;
+                    if (parts[0] == "physicMaterial" || parts[0] == "sharedPhysicMaterial")
+                    {
+                        hasMaterial = true;
+                        Collider collider = currComponent as Collider;
+                        value = MaterialFromString(parts[1], typeof(PhysicMaterial));
+
+                        if (parts[0] == "physicMaterial")
+                            collider.material = value as PhysicMaterial;
+                        else
+                            collider.sharedMaterial = value as PhysicMaterial;
+                    }
+                    else if (propertyUnityComponent.PropertyType.Equals(typeof(Mesh)))
+                    {
+                        value = MeshFromString(ref parts[1], ref _lines, ref _i);
+                    }
+                    else if (parts[0] == "parent")
+                    {
+                        value = _gameObject.transform.parent;
+                    }
+                    else if (propertyUnityComponent.PropertyType == typeof(Rect))
+                    {
+                        string rectValues = _lines[_i].Remove(0, _lines[_i].IndexOf("("));
+                        RemoveChar(ref rectValues, RemoveCharState.Last, '\"');
+                        value = RectFromString(rectValues);
+                    }
+                    else
+                    {
+                        value = parts[1].FromJsonString(propertyUnityComponent.PropertyType);
+                    }
+
+                    if (!hasMaterial)
+                        propertyUnityComponent.SetValue(currComponent, value);
                 }
             }
-            
-            _currLine = _stream.ReadLine();
-        }
+        } while (!isEndOfComponent);
+    }
+    static void GameObjectFromString(ref string[] _lines, ref int _i, ref GameObject _gameObject)
+    {
+        int componentsCount = 0;
+        int childCount = 0;
 
-        List<Transform> childrenT = new List<Transform>();
-        for (int j = 0; j < _go.transform.childCount; j++)
+        string[] parts = null;
+        for (int j = 0; j < 6; j++) //GameObjects : Name, Tag, Layer, IsActive, ChildCount, ComponentsCount
         {
-            childrenT.Add(_go.transform.GetChild(j));
+            parts = _lines[++_i].Split(':');
+            RemoveChar(ref parts[1], RemoveCharState.Last, ',');
+            parts[1] = parts[1].Trim('\"', ' ');
+
+            switch (j)
+            {
+                case 0: _gameObject.name = parts[1]; break;
+                case 1: _gameObject.tag = parts[1]; break;
+                case 2: _gameObject.layer = int.Parse(parts[1]); break;
+                case 3: _gameObject.SetActive(bool.Parse(parts[1])); break;
+                case 4: childCount = int.Parse(parts[1]); break;
+                case 5: componentsCount = int.Parse(parts[1]); break;
+            }
         }
 
-        for (int j = 0; j < children.Length; j++)
+        for (int j = 0; j < componentsCount; j++)
+        {
+            ComponentFromString(ref _lines, ref _i, ref _gameObject);
+        }
+
+        if (childCount > 0)
         {
             GameObject child = null;
 
-            int siblingIndex = childrenT.FindIndex(n => n.name == children[j]);
-
-            if (siblingIndex == -1) //Si l'enfant sauvegardé n'est pas dans la hierarchie
+            for (int k = 0; k < childCount; k++)
             {
-                child = new GameObject();
-                child.transform.SetParent(_go.transform);
-            }
-            else
-            {
-                child = childrenT[siblingIndex].gameObject;
-            }
+                string childName = _lines[++_i];
+                RemoveChar(ref childName, RemoveCharState.Last, ' ');
+                childName = childName.Trim('\"').Remove(0, 6);
 
-            child.transform.SetSiblingIndex(j); //Je mets l'enfant au bon index de la hierarchie
-            GameObjectFromString(ref _currLine, _stream, ref child);
-
-            //if (j + 1 < children.Length) //Si ce n'est pas le dernier enfant
-            _currLine = _stream.ReadLine();
-        }
-
-        return _go;
-    }
-    static object MeshFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
-    {
-        Mesh mesh = null;
-
-        if (!_currLine.Contains("null"))
-        {
-            _currLine = _stream.ReadLine();
-            _currLine = _stream.ReadLine(); //Je mets le curseur sur la premiere propriete
-
-            mesh = new Mesh();
-            PropertyInfo[] properties = mesh.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-            foreach (PropertyInfo property in properties)
-            {
-                string[] parts = _currLine.Split(':');
-
-                if (property.CanWrite)
+                Transform currChild = k < _gameObject.transform.childCount ? _gameObject.transform.GetChild(k) : null;
+                if (currChild == null || currChild.name != childName) //L'enfant n'existe pas
                 {
-                    for (int j = 0; j < parts.Length; j++)
-                    {
-                        Filter(ref parts[j]);
-                    }
-
-                    if (property.Name == parts[0])
-                    {
-                        object value = null;
-
-                        if (_currLine.Contains("bounds"))
-                        {
-                            Bounds bounds = new Bounds();
-                            RemoveLast(",", ref parts[2]);
-                            bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
-                            bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
-                        }
-                        else if (!parts[1].Contains("null"))
-                        {
-                            value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
-                        }
-
-                        property.SetValue(mesh, value);
-                    }
-                    _currLine = _stream.ReadLine();
+                    child = new GameObject();
+                    child.transform.SetParent(_gameObject.transform);
                 }
+                else
+                {
+                    child = currChild.gameObject;
+                }
+                child.transform.SetSiblingIndex(k); //Je mets l'enfant au bon index de la hierarchie
+                GameObjectFromString(ref _lines, ref _i, ref child); //Je récupère l'enfant
             }
         }
-
-        return mesh.ConvertTo(typeof(object));
-    }
-    static object RenderTextureFromString(ref string _currLine, StreamReader _stream, ref GameObject _go)
-    {
-        RenderTexture renderTexture = null;
-
-        if (!_currLine.Contains("null"))
-        {
-            string renderTextureName = _currLine.Split(':')[1].Remove(0, 2);
-            renderTextureName = renderTextureName.Remove(renderTextureName.IndexOf("\""));
-            renderTexture = Resources.Load<RenderTexture>(renderTextureName);
-            //_currLine = _stream.ReadLine();
-            //_currLine = _stream.ReadLine(); //Je mets le curseur sur la premiere propriete
-
-            //RenderTextureDescriptor descriptor = new RenderTextureDescriptor();
-            //object descriptorObject = descriptor; //Pour ensuite assigner les valeurs à la reference de descriptor car c'est une struct
-
-            //PropertyInfo[] properties = descriptorObject.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-            //foreach (PropertyInfo property in properties)
-            //{
-            //    string[] parts = _currLine.Split(':');
-
-            //    if (property.CanWrite)
-            //    {
-            //        for (int j = 0; j < parts.Length; j++)
-            //        {
-            //            Filter(ref parts[j]);
-            //        }
-
-            //        if (property.Name == parts[0])
-            //        {
-            //            object value = null;
-
-            //            if (!parts[1].Contains("null"))
-            //            {
-            //                value = GetObjectFromString(property.PropertyType, parts[1], ref _currLine, ref _go, _stream);
-            //            }
-
-            //            property.SetValue(descriptorObject, value);
-
-            //        }
-            //        _currLine = _stream.ReadLine();
-            //    }
-            //}
-            //descriptor = (RenderTextureDescriptor)descriptorObject;
-            //renderTexture = new RenderTexture(descriptor);
-        }
-
-        return renderTexture.ConvertTo(typeof(object));
     }
     static object Matrix4x4FromString(string _stringValue)
     {
@@ -842,95 +564,121 @@ public static class JSONSerialization
 
         for (int i = 0; i < 4; i++)
         {
-            matrix4X4.SetRow(i, (Vector4)VectorFromString(parts[i], typeof(Vector4)).ConvertTo(typeof(Vector4)));
+            matrix4X4.SetRow(i, (Vector4)VectorFromString(parts[i], typeof(Vector4)));
         }
 
         return matrix4X4;
     }
-    static object QuaternionFromString(string _stringValue)
+    static object MeshFromString(ref string _firstValue, ref string[] _lines, ref int _i)
     {
-        string[] parts = _stringValue.Split(',');
-        float[] values = new float[parts.Length];
-        for (int i = 0; i < values.Length; i++)
+        Mesh mesh = null;
+
+        if (_firstValue != "null")
         {
-            float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out values[i]);
+            mesh = new Mesh();
+            bool isEndOfComponent = false;
+
+            do
+            {
+                string[] parts = _lines[++_i].Split(':');
+
+                if (parts[1] == string.Empty)
+                {
+                    isEndOfComponent = true;
+                    _i--;
+                }
+                else
+                {
+                    RemoveChar(ref parts[1], RemoveCharState.Last, ',');
+                    for (int k = 0; k < parts.Length; k++)
+                    {
+                        parts[k] = parts[k].Trim('\"', ' ');
+                    }
+
+                    object value = null;
+                    PropertyInfo property = mesh.GetType().GetProperty(parts[0]);
+
+                    if (parts[0] == "bounds")
+                    {
+                        Bounds bounds = new Bounds();
+                        RemoveChar(ref parts[2], RemoveCharState.Last, ',');
+                        RemoveChar(ref parts[3], RemoveCharState.Last, '\"');
+                        bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
+                        bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
+                        value = bounds;
+                    }
+                    else
+                    {
+                        value = parts[1].FromJsonString(property.PropertyType);
+                    }
+                    property.SetValue(mesh, value);
+                }
+            } while (!isEndOfComponent);
         }
 
-        return new Quaternion(values[0], values[1], values[2], values[3]);
+        return mesh;
     }
-    static object ArrayFromString(string _stringValue, Type _arrayType)
+    static object MaterialFromString(string _materialName, Type _materialType)
+    {
+        string path = _materialType == typeof(Material) ? "Materials/" : "PhysicsMaterials/";
+        return _materialName == "Default-Material" ? new Material(Shader.Find("Standard")) : Resources.Load(path + _materialName, _materialType);
+    }
+    static object ArrayFromString(string _stringValue, Type _targetType)
     {
         List<object> array = new List<object>();
 
-        if (_stringValue != "[]")
+        if (_stringValue != "[]" && _stringValue != "null")
         {
             _stringValue = _stringValue.Trim('[', ']');
 
-            Type elementType = _arrayType.IsArray ? _arrayType.GetElementType() : _arrayType.GetProperty("Item").PropertyType; //R�cup�re le type des �l�ments de la liste OU du tableau
-            string[] parts = _stringValue.Split(',');
+            Type elementType = _targetType.IsArray ? _targetType.GetElementType() : _targetType.GetProperty("Item").PropertyType; //R�cup�re le type des �l�ments de la liste OU du tableau
 
-            if (elementType.Name.Contains("Vector"))
+            string[] parts = _stringValue.Split(',').Select(n => n.Trim('\"')).ToArray();
+            if (elementType.Name.Contains("Vector") || elementType == typeof(Quaternion))
             {
-                array = StringToVectorFormat(parts, elementType);
+                array = SplitVectorStringToVectorFormat(_stringValue, elementType);
             }
             else
             {
                 foreach (string part in parts)
-                {
-                    array.Add(Convert.ChangeType(part, elementType, CultureInfo.InvariantCulture));
+                {                    
+                    array.Add(part.FromJsonString(elementType));
                 }
             }
         }
-
-        return array.ConvertTo(_arrayType);
+        return array.ConvertTo(_targetType);
     }
-    static object VectorFromString(string _stringValue, Type _vectorType)
+    static object ValueTypeFromString(string _stringValue, Type _type)
     {
-        string[] parts = _stringValue.Split(',');
-
-        bool hasFloat = _vectorType == typeof(Vector2) || _vectorType == typeof(Vector3) || _vectorType == typeof(Vector4);
-
-        float[] values = new float[parts.Length];
-        for (int i = 0; i < values.Length; i++)
+        object primitiveFromString = null;
+        if (_type.Name.Contains("Vector") || _type == typeof(Quaternion))
         {
-            float.TryParse(parts[i], hasFloat ? NumberStyles.Float : NumberStyles.Integer, CultureInfo.InvariantCulture, out values[i]);
+            primitiveFromString = VectorFromString(_stringValue, _type);
         }
-
-        object vector = Activator.CreateInstance(_vectorType);
-
-        switch (parts.Length)
+        else if (_type.IsEnum)
         {
-            case 2:
-                if (hasFloat)
-                    vector = new Vector2(values[0], values[1]);
-                else
-                    vector = new Vector2Int((int)values[0], (int)values[1]);
-                break;
-            case 3:
-                if (hasFloat)
-                    vector = new Vector3(values[0], values[1], values[2]);
-                else
-                    vector = new Vector3Int((int)values[0], (int)values[1], (int)values[2]);
-                break;
-            case 4: vector = new Vector4(values[0], values[1], values[2], values[3]); break;
+            primitiveFromString = Enum.Parse(_type, _stringValue);
         }
+        else if (_type == typeof(Matrix4x4))
+        {
+            primitiveFromString = Matrix4x4FromString(_stringValue);
+        }
+        else if (_type == typeof(Color))
+        {
+            primitiveFromString = ColorFromString(_stringValue);
+        }
+        else if (_type == typeof(Rect))
+        {
+            primitiveFromString = RectFromString(_stringValue);
+        }
+        else
+        {
+            _stringValue = _stringValue.Trim(' ', '\"'); 
+            primitiveFromString = Convert.ChangeType(_stringValue, _type);
+        }
+        return primitiveFromString;
+    }
 
-        return vector;
-    }
-    static object ColorFromString(string _stringValue)
-    {
-        string colorStr = _stringValue.Remove(0, 4).Trim('(', ')'); //formattage en Vector4
-        Vector4 colorValues = (Vector4)VectorFromString(colorStr, typeof(Vector4));
-
-        return new Color(colorValues.x, colorValues.y, colorValues.z, colorValues.w);
-    }
-    static object RectFromString(string _stringValue)
-    {
-        string rectString = _stringValue.Remove(0,_stringValue.IndexOf('(')).Trim('(', ')','\"', ',').
-            Replace("x:", string.Empty).Replace("y:", string.Empty).Replace("width:", string.Empty).Replace("height:", string.Empty);
-        Vector4 rectValues = (Vector4)VectorFromString(rectString, typeof(Vector4));
-        return new Rect(rectValues.x, rectValues.y, rectValues.z, rectValues.w);
-    }
     #endregion
 
     #region Utilities
@@ -944,107 +692,127 @@ public static class JSONSerialization
             }
         }
     }
-
-    static void Filter(ref string _string)
+    static StringBuilder ToJsonFormat<T>(this T obj, string _fieldName)
     {
-        char[] filters = new char[] { '\n', '\"', ':', ' ', '(', ')' };
+        StringBuilder toJson = null;
+        Type type = obj.GetType();
 
-        if (!_string.Contains("Script"))
-        {
-            foreach (char c in filters)
-            {
-                _string = _string.Replace(c.ToString(), string.Empty);
-            }
+        if (type == typeof(Matrix4x4))
+            toJson = FormatMatrix4x4ToString((obj as Matrix4x4?).Value, _fieldName);
+        else if (type == typeof(string) || type.IsValueType)
+            toJson = FormatStringToJson(obj, _fieldName);
+        else if (type.BaseType == typeof(Array) || type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
+            toJson = ArrayToString(obj, _fieldName);
+        else if (type == typeof(GameObject))
+            toJson = FormatGameObjectToString(obj as GameObject, _fieldName);
+        else if (type.BaseType == typeof(Component) || type.BaseType == typeof(Renderer) || type.BaseType == typeof(Collider) ||
+                 type.BaseType == typeof(Behaviour) || type.BaseType == typeof(MonoBehaviour) || type.BaseType == typeof(AudioBehaviour))
+            toJson = FormatComponentToString(obj as Component, _fieldName);
+        else if (type == typeof(Material) || type == typeof(PhysicMaterial))
+            toJson = MaterialToString(obj, _fieldName);
+        else if (type == typeof(Mesh))
+            toJson = FormatMeshToString(obj as Mesh, _fieldName);
+        else if (type == typeof(RenderTexture))
+            toJson = new StringBuilder("\"" + _fieldName + "\" : \"" + obj.ToString().Replace(" (UnityEngine.RenderTexture)", string.Empty) + "\",\n");
 
-            if (_string != string.Empty && _string[_string.Length - 1] == ',')
-                RemoveLast(",", ref _string);
-        }
-        else
+        return toJson;
+    }
+    static object FromJsonString(this string obj, Type _target)
+    {
+        object objectFromString = null;
+
+        if (_target == typeof(Matrix4x4))
+            objectFromString = Matrix4x4FromString(obj);
+        else if (_target == typeof(string) || _target.IsValueType)
+            objectFromString = ValueTypeFromString(obj, _target);
+        else if (_target.BaseType == typeof(Array) || _target.IsGenericType && _target.GetGenericTypeDefinition() == typeof(List<>))
+            objectFromString = ArrayFromString(obj, _target);
+        else if (_target == typeof(Material) || _target == typeof(PhysicMaterial))
+            objectFromString = MaterialFromString(obj, _target);
+        else if (_target == typeof(Rect))
+            objectFromString = RectFromString(obj);
+        else if (_target == typeof(RenderTexture))
+            objectFromString = Resources.Load<RenderTexture>("RenderTextures/" + obj);
+
+        return objectFromString;
+    }
+    static void RemoveChar(ref StringBuilder _valueStr, RemoveCharState _removeState, params char[] _charToRemoved)
+    {
+        switch (_removeState)
         {
-            _string = _string.Substring(_string.IndexOf(':') + 2);
-            RemoveLast("\"", ref _string);
+            case RemoveCharState.Anywhere:
+                foreach (char c in _charToRemoved)
+                {
+                    _valueStr = _valueStr.Replace(c.ToString(), string.Empty);
+                }
+                break;
+            case RemoveCharState.Last:
+                for (int i = 0; i < _charToRemoved.Length; i++)
+                {
+                    for (int j = _valueStr.Length - 1; j >= 0; j--)
+                    {
+                        if (_valueStr[j] == _charToRemoved[i])
+                        {
+                            _valueStr = _valueStr.Remove(j, _valueStr.Length - j);
+                            break;
+                        }
+                    }
+                }
+                break;
+            default:
+                Debug.LogError("RemoveChar Function out of range");
+                break;
         }
     }
-
-    static void RemoveLast(string charRemoved, ref string _value)
+    static void RemoveChar(ref string _valueStr, RemoveCharState _removeState, params char[] _charToRemoved)
     {
-        int count = _value.LastIndexOf(charRemoved);
-        _value = count > 0 ? _value.Remove(count, _value.Length - count) : _value;
+        switch (_removeState)
+        {
+            case RemoveCharState.Anywhere:
+                foreach (char c in _charToRemoved)
+                {
+                    _valueStr = _valueStr.Replace(c.ToString(), string.Empty);
+                }
+                break;
+            case RemoveCharState.Last:
+                foreach (char c in _charToRemoved)
+                {
+                    int index = _valueStr.LastIndexOf(c);
+                    _valueStr = index > 0 ? _valueStr.Remove(index, _valueStr.Length - index) : _valueStr;
+                }
+                break;
+            default:
+                Debug.LogError("RemoveChar Function out of range");
+                break;
+        }
     }
-
-    static List<object> StringToVectorFormat(string[] _stringValue, Type _vectorType)
+    static List<object> SplitVectorStringToVectorFormat(string _values, Type _vectorType)
     {
-        int vecDimension = _vectorType == typeof(Vector2) ? 2 : _vectorType == typeof(Vector3) ? 3 : _vectorType == typeof(Vector4) ? 4 : 0;
-        string currentVector = string.Empty;
-        List<object> arrayVector = new List<object>();
+        List<object> vectorList = new List<object>();
+        int startIndex = 0;
+        int endIndex = 0;
+        int quoteCount = 0;
 
-        for (int i = 0; i < _stringValue.Length + 1; i++)
+        RemoveChar(ref _values, RemoveCharState.Anywhere,  ' ');
+
+        for (int i = 0; i < _values.Length; i++)
         {
-            if (i != 0 && i % vecDimension == 0)
+            if (_values[i] == '\"')
             {
-                RemoveLast(",", ref currentVector);
-                arrayVector.Add(VectorFromString(currentVector, _vectorType));
+                quoteCount++;
 
-                if (i < _stringValue.Length)
-                    currentVector = _stringValue[i] + ",";
+                if (quoteCount % 2 == 0) //Si on a atteint la fin du vecteur
+                {
+                    endIndex = i;
+
+                    string element = _values.Substring(startIndex + 1, endIndex - startIndex - 1);
+                    vectorList.Add(VectorFromString(element, _vectorType));
+
+                    startIndex = i + 2;
+                }
             }
-            else
-            {
-                currentVector += _stringValue[i] + ",";
-            }
         }
-        return arrayVector;
-    }
-
-    static object GetObjectFromString(Type _objectType, string _strValue, ref string _currLine, ref GameObject _go, StreamReader _stream)
-    {
-        object value = null;
-
-        if (_objectType.Name.Contains("Quaternion"))
-        {
-            value = QuaternionFromString(_strValue);
-        }
-        else if (_objectType == typeof(Matrix4x4))
-        {
-            value = Matrix4x4FromString(_strValue);
-        }
-        else if (_objectType.Name.Contains("List") || _objectType.IsArray)
-        {
-            value = ArrayFromString(_strValue, _objectType);
-        }
-        else if (_objectType.Name.Contains("Vector"))
-        {
-            value = VectorFromString(_strValue, _objectType);
-        }
-        else if (_objectType.IsEnum)
-        {
-            value = Enum.Parse(_objectType, _strValue);
-        }
-        else if (_objectType == typeof(Transform))
-        {
-            value = _strValue.Equals("null") ? null : _go.transform.parent;
-        }
-        else if (_objectType == typeof(Mesh))
-        {
-            value = MeshFromString(ref _currLine, _stream, ref _go);
-        }     
-        else if (_objectType == typeof(RenderTexture))
-        {
-            value = RenderTextureFromString(ref _currLine, _stream, ref _go);
-        }     
-        else if (_objectType == typeof(Color))
-        {
-            value = ColorFromString(_strValue);
-        }
-        else if (_objectType == typeof(Rect))
-        {
-            value = RectFromString(_currLine);
-        }
-        else
-        {
-            value = Convert.ChangeType(_strValue, _objectType, CultureInfo.InvariantCulture); //Dernier param�tre pour que la virgule soit consid�r� comme un point
-        }
-        return value;
+        return vectorList;
     }
     #endregion
 }
