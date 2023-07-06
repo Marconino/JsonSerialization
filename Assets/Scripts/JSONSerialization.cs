@@ -62,7 +62,7 @@ public static class JSONSerialization
     public static void Load(string _filename)
     {
         UpdateJSONObjects();
-        
+
         MonoBehaviour currentScript = null;
         StringBuilder json = new StringBuilder();
         Dictionary<string, GameObject> gameObjectsInstancied = new Dictionary<string, GameObject>();
@@ -245,7 +245,7 @@ public static class JSONSerialization
 
         foreach (PropertyInfo property in componentType.GetProperties(bindingFlags | BindingFlags.DeclaredOnly))
         {
-            if (property.CanWrite && property.Name != "root" && property.Name != "scene")
+            if (property.CanWrite && property.CanRead && property.Name != "root" && property.Name != "scene")
             {
                 object propertyValue = property.GetValue(_component);
 
@@ -465,44 +465,54 @@ public static class JSONSerialization
                 }
                 else
                 {
+
                     object value = null;
-                    PropertyInfo propertyUnityComponent = componentType.GetProperty(parts[0]);
+                    PropertyInfo propertyUnityComponent = componentType.GetProperty(parts[0], BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly | BindingFlags.NonPublic);
                     bool hasMaterial = false;
-                    if (parts[0] == "physicMaterial" || parts[0] == "sharedPhysicMaterial")
+                    if (propertyUnityComponent != null)
                     {
-                        hasMaterial = true;
-                        Collider collider = currComponent as Collider;
-                        value = MaterialFromString(parts[1], typeof(PhysicMaterial));
+                        if (parts[0] == "physicMaterial" || parts[0] == "sharedPhysicMaterial")
+                        {
+                            hasMaterial = true;
+                            Collider collider = currComponent as Collider;
+                            value = MaterialFromString(parts[1], typeof(PhysicMaterial));
 
-                        if (parts[0] == "physicMaterial")
-                            collider.material = value as PhysicMaterial;
+                            if (parts[0] == "physicMaterial")
+                                collider.material = value as PhysicMaterial;
+                            else
+                                collider.sharedMaterial = value as PhysicMaterial;
+                        }
+                        else if (propertyUnityComponent.PropertyType.Equals(typeof(Mesh)))
+                        {
+                            value = MeshFromString(ref parts[1], ref _lines, ref _i);
+                        }
+                        else if (parts[0] == "parent")
+                        {
+                            value = _gameObject.transform.parent;
+                        }
+                        else if (propertyUnityComponent.PropertyType == typeof(Rect))
+                        {
+                            string rectValues = _lines[_i].Remove(0, _lines[_i].IndexOf("("));
+                            RemoveChar(ref rectValues, RemoveCharState.Last, '\"');
+                            value = RectFromString(rectValues);
+                        }
                         else
-                            collider.sharedMaterial = value as PhysicMaterial;
-                    }
-                    else if (propertyUnityComponent.PropertyType.Equals(typeof(Mesh)))
-                    {
-                        value = MeshFromString(ref parts[1], ref _lines, ref _i);
-                    }
-                    else if (parts[0] == "parent")
-                    {
-                        value = _gameObject.transform.parent;
-                    }
-                    else if (propertyUnityComponent.PropertyType == typeof(Rect))
-                    {
-                        string rectValues = _lines[_i].Remove(0, _lines[_i].IndexOf("("));
-                        RemoveChar(ref rectValues, RemoveCharState.Last, '\"');
-                        value = RectFromString(rectValues);
-                    }
-                    else
-                    {
-                        value = parts[1].FromJsonString(propertyUnityComponent.PropertyType);
-                    }
+                        {
+                            value = parts[1].FromJsonString(propertyUnityComponent.PropertyType);
+                        }
 
-                    if (!hasMaterial)
-                        propertyUnityComponent.SetValue(currComponent, value);
+                        if (!hasMaterial)
+                            propertyUnityComponent.SetValue(currComponent, value);
+                    }
                 }
             }
         } while (!isEndOfComponent);
+
+        if (componentType == typeof(Camera))
+        {
+            Camera camera = currComponent as Camera;
+            camera.ResetWorldToCameraMatrix();
+        }
     }
     static void GameObjectFromString(ref string[] _lines, ref int _i, ref GameObject _gameObject)
     {
@@ -598,20 +608,23 @@ public static class JSONSerialization
                     object value = null;
                     PropertyInfo property = mesh.GetType().GetProperty(parts[0]);
 
-                    if (parts[0] == "bounds")
+                    if (property != null)
                     {
-                        Bounds bounds = new Bounds();
-                        RemoveChar(ref parts[2], RemoveCharState.Last, ',');
-                        RemoveChar(ref parts[3], RemoveCharState.Last, '\"');
-                        bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
-                        bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
-                        value = bounds;
+                        if (parts[0] == "bounds")
+                        {
+                            Bounds bounds = new Bounds();
+                            RemoveChar(ref parts[2], RemoveCharState.Last, ',');
+                            RemoveChar(ref parts[3], RemoveCharState.Last, '\"');
+                            bounds.center = (Vector3)VectorFromString(parts[2], typeof(Vector3));
+                            bounds.extents = (Vector3)VectorFromString(parts[3], typeof(Vector3));
+                            value = bounds;
+                        }
+                        else
+                        {
+                            value = parts[1].FromJsonString(property.PropertyType);
+                        }
+                        property.SetValue(mesh, value);
                     }
-                    else
-                    {
-                        value = parts[1].FromJsonString(property.PropertyType);
-                    }
-                    property.SetValue(mesh, value);
                 }
             } while (!isEndOfComponent);
         }
@@ -641,7 +654,7 @@ public static class JSONSerialization
             else
             {
                 foreach (string part in parts)
-                {                    
+                {
                     array.Add(part.FromJsonString(elementType));
                 }
             }
@@ -673,7 +686,7 @@ public static class JSONSerialization
         }
         else
         {
-            _stringValue = _stringValue.Trim(' ', '\"'); 
+            _stringValue = _stringValue.Trim(' ', '\"');
             primitiveFromString = Convert.ChangeType(_stringValue, _type);
         }
         return primitiveFromString;
@@ -793,7 +806,7 @@ public static class JSONSerialization
         int endIndex = 0;
         int quoteCount = 0;
 
-        RemoveChar(ref _values, RemoveCharState.Anywhere,  ' ');
+        RemoveChar(ref _values, RemoveCharState.Anywhere, ' ');
 
         for (int i = 0; i < _values.Length; i++)
         {
